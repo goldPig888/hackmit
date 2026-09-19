@@ -8,11 +8,13 @@ from .detectors import BaseDetector, DetectorRegistry, register_detector
 from .testing import ComponentTester, MockDetectionGenerator, MockIMUGenerator, PipelineTester
 from .hazards import SyncHazardDetector, PatternAnalyzer
 from .fine_tuning import ModelTrainer, ModelEvaluator, DataLoader
+from .dashboard import DashboardServer, DataStreamer
 
 __all__ = [
     "ArgusPipeline", "Detection", "HapticEvent", "RiskAssessment", "TrackState",
     "BaseDetector", "DetectorRegistry", "register_detector",
     "ComponentTester", "MockDetectionGenerator", "MockIMUGenerator", "PipelineTester",
     "SyncHazardDetector", "PatternAnalyzer",
-    "ModelTrainer", "ModelEvaluator", "DataLoader"
+    "ModelTrainer", "ModelEvaluator", "DataLoader",
+    "DashboardServer", "DataStreamer"
 ]

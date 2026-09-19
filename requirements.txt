@@ -4,3 +4,7 @@ numpy>=2.0
 # Optional camera, detector, tracker, and visualization support
 opencv-python>=4.10
 ultralytics>=8.3
+
+# Optional dashboard dependencies
+aiohttp>=3.9
+aiohttp-cors

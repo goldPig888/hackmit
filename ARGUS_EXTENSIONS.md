@@ -262,4 +262,45 @@ All new components have been tested and are working:
 4. **Testability**: Comprehensive testing tools for development and validation
 5. **Production-Ready**: Includes error handling, cleanup, and resource management
 
-This framework gives you a solid foundation to incorporate your custom weapons detection model, test it thoroughly, and integrate it with the sophisticated ARGUS safety system. The plugin architecture allows you to easily add more custom detectors (sync hazards, other specialized models) following the same pattern.
+## 🌐 Remote Monitoring System
+
+### Live Dashboard
+- **Real-time web dashboard** with Server-Sent Events streaming
+- **Mobile-responsive design** optimized for phone access
+- **Cloudflare tunnel integration** for remote access
+- **REST API endpoints** for data access and integration
+
+### Video Overlay
+- **Real-time video overlays** with detection boxes and risk scores
+- **Trajectory visualization** showing predicted paths
+- **Hazard warning overlays** for coordinated threats
+- **System information display** (FPS, counts, timing)
+
+### Cloudflare Tunnel
+- **Quick tunnel setup** for temporary public URLs
+- **Permanent tunnel configuration** for custom domains
+- **Secure remote access** from any device
+- **Mobile phone compatibility** for field monitoring
+
+## 🚀 Quick Start for Remote Monitoring
+
+```bash
+# Start demo dashboard with simulated data
+bash scripts/start_monitoring.sh
+# Select option 1
+
+# Start Cloudflare tunnel for phone access
+bash scripts/start_quick_tunnel.sh
+
+# Access the provided URL on your phone
+```
+
+## 📱 Mobile Access Features
+
+- **Responsive layout** adapts to different screen sizes
+- **Touch-optimized interface** for mobile interaction
+- **Real-time updates** via SSE streaming
+- **Connection status indicator** for monitoring
+- **Low-bandwidth optimization** for cellular networks
+
+This framework gives you a solid foundation to incorporate your custom weapons detection model, test it thoroughly, and integrate it with the sophisticated ARGUS safety system. The plugin architecture allows you to easily add more custom detectors (sync hazards, other specialized models) following the same pattern. The remote monitoring system enables real-time observation from your phone anywhere with internet access.
