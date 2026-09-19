@@ -16,6 +16,7 @@
         <div class="pill"><span>TRK</span><b id="stTrk">0</b></div>
         <div class="pill" id="stHap"><span>HAPTIC</span><b>--</b></div>
         <div class="pill wm" id="stWm"><b>WORLD MODEL: --</b></div>
+        <button id="clearSubjects" title="Clear tracked subjects and reacquire from the live feed">CLEAR SUBJECTS</button>
     </div>
 </header>
 
@@ -29,6 +30,11 @@
         </div>
         <div class="cam-wrap" id="camWrap">
             <canvas id="camOverlay"></canvas>
+            <div class="camera-alert" id="cameraAlert" hidden>
+                <div class="camera-alert-kicker">PREDICTED CONFLICT</div>
+                <div class="camera-alert-title" id="cameraAlertTitle">—</div>
+                <div class="camera-alert-meta" id="cameraAlertMeta">—</div>
+            </div>
             <div class="cam-hud" id="camHud">YAW -- · PITCH -- · ROLL --</div>
             <div class="cam-nofeed" id="camNoFeed">WAITING FOR PHONE STREAM — open /phone on iPhone</div>
         </div>

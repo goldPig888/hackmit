@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from aiohttp import web, WSMsgType
 from aiohttp.web import Application, Request, Response, WebSocketResponse
 
@@ -33,6 +33,7 @@ class DashboardServer:
         self.websocket_clients: set[WebSocketResponse] = set()
         self.phone_receiver = PhoneStreamReceiver()
         self.world_state: dict = {"ready": False}
+        self.clear_subjects_handler: Optional[Callable[[], None]] = None
 
     def _setup_routes(self) -> None:
         """Setup HTTP routes."""
@@ -49,6 +50,7 @@ class DashboardServer:
             web.get('/phone', self.serve_phone_page),
             web.get('/ingest', self.ingest_handler),
             web.get('/api/world', self.get_world_state),
+            web.post('/api/clear-subjects', self.clear_subjects),
             web.static('/static', self._get_static_dir())
         ])
 
@@ -77,6 +79,17 @@ class DashboardServer:
     def set_world_state(self, state: dict) -> None:
         """Store the latest console world-state snapshot (called by CV loop)."""
         self.world_state = state
+
+    def set_clear_subjects_handler(self, handler: Callable[[], None]) -> None:
+        """Register a processing-loop-safe callback for the console reset button."""
+        self.clear_subjects_handler = handler
+
+    async def clear_subjects(self, request: Request) -> Response:
+        """Request a clean tracking epoch; incoming frames immediately reacquire subjects."""
+        if self.clear_subjects_handler is None:
+            return web.json_response({"ok": False, "message": "processor is not ready"}, status=503)
+        self.clear_subjects_handler()
+        return web.json_response({"ok": True, "message": "subjects cleared"})
 
     async def get_world_state(self, request: Request) -> Response:
         """Latest unified world-state snapshot for the console UI."""

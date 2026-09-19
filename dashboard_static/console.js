@@ -188,7 +188,10 @@ function camRect(fw, fh) {
 
 function drawCamera(s, tracks) {
     const r = camWrap.getBoundingClientRect();
-    camCv.width = r.width; camCv.height = r.height;
+    // Keep canvas backing pixels aligned with its CSS box on Retina displays.
+    const dpr = window.devicePixelRatio || 1;
+    camCv.width = Math.round(r.width * dpr); camCv.height = Math.round(r.height * dpr);
+    cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cctx.fillStyle = "#000"; cctx.fillRect(0, 0, r.width, r.height);
     $("camNoFeed").classList.toggle("show", !camBmp && !DEMO);
 
@@ -260,10 +263,10 @@ function drawCamera(s, tracks) {
         if (t.bbox) {
             const [bx, by] = toScr([t.bbox[0], t.bbox[1]]);
             const bw = t.bbox[2] * m.sc, bh = t.bbox[3] * m.sc;
-            cctx.strokeStyle = col; cctx.lineWidth = primary ? 2.5 : (linked ? 2 : 1);
+            cctx.strokeStyle = col; cctx.lineWidth = primary ? 4 : (linked ? 2.5 : 1.5);
             cctx.strokeRect(bx, by, bw, bh);
             if (primary || linked) {
-                cctx.fillStyle = col; cctx.font = "bold 11px monospace";
+                cctx.fillStyle = col; cctx.font = "bold 14px monospace";
                 const label = `${t.cls.toUpperCase()} #${t.id.split("-").pop()}${primary ? " ⚠" : ""}`;
                 cctx.fillText(label, bx, by - 6);
             }
@@ -405,7 +408,7 @@ function drawWorld(s, tracks) {
         wctx.stroke();
         wctx.fillStyle = "rgba(34,211,238,0.9)"; wctx.font = "9px monospace";
         const end = w2s(rp[rp.length - 1]);
-        wctx.fillText("CURRENT INTENT", end[0] + 6, end[1]);
+        wctx.fillText("ME · CURRENT PATH", end[0] + 6, end[1]);
     }
     const sp = s.rider_state.straight_path || [];
     if (sp.length > 1 && s.rider_state.turning) {
@@ -467,8 +470,10 @@ function drawWorld(s, tracks) {
     wctx.strokeStyle = "rgba(34,211,238,0.35)"; wctx.lineWidth = 1;
     wctx.beginPath(); wctx.arc(0, 0, 18, 0, Math.PI * 2); wctx.stroke();
     wctx.restore();
-    wctx.fillStyle = "rgba(34,211,238,0.8)"; wctx.font = "9px monospace";
-    wctx.fillText("RIDER", egoX + 14, egoY + 14);
+    wctx.fillStyle = "rgba(34,211,238,1)"; wctx.font = "bold 11px monospace";
+    wctx.fillText("ME", egoX + 14, egoY + 12);
+    wctx.fillStyle = "rgba(34,211,238,0.78)"; wctx.font = "9px monospace";
+    wctx.fillText("CURRENT", egoX + 14, egoY + 25);
 }
 
 function hexA(hex, a) {
@@ -579,6 +584,29 @@ function updateDom(s, tracks) {
         $("whyList").innerHTML = `<li class="dim">no active threat</li>`;
     }
 
+    // This card deliberately sits on top of the camera, independent of whether
+    // a world point can be reprojected into pixel coordinates.
+    const alert = $("cameraAlert");
+    const alertTrack = tracks.find(t => t.id === s.primary_threat_id);
+    // Keep the large camera annotation present for the selected track. It
+    // changes vocabulary/color with risk instead of flashing away between
+    // low-risk frames and the next risk assessment.
+    const showAlert = Boolean(th && alertTrack);
+    alert.hidden = !showAlert;
+    if (showAlert) {
+        const high = th.risk >= 0.70;
+        const conflict = th.risk >= 0.30;
+        alert.classList.toggle("high", high);
+        alert.classList.toggle("track", !conflict);
+        $("cameraAlertTitle").textContent = `${(th.direction_label || "TRACKING").toUpperCase()} · ${Math.round(th.risk * 100)}%`;
+        const cpa = th.tcpa != null && isFinite(th.tcpa)
+            ? `${th.tcpa.toFixed(1)}s TO CPA`
+            : (conflict ? "TRACKING CONFLICT" : "PREDICTED PATH ACTIVE");
+        const label = (alertTrack && alertTrack.cls ? alertTrack.cls.toUpperCase() : th.cls || "OBJECT").toUpperCase();
+        alert.querySelector(".camera-alert-kicker").textContent = conflict ? "PREDICTED CONFLICT" : "TRACKING";
+        $("cameraAlertMeta").textContent = `${label} · ${cpa}`;
+    }
+
     // haptics (decay after 1.5s)
     const hp = s.haptic || {};
     const stale = (s.timestamp - (hp.ts || 0)) > 1.5 ? 0 : 1;
@@ -652,6 +680,22 @@ $("replayBtn").addEventListener("click", () => {
     if (!S.snapshots.length) return;
     S.replay = { idx: 0 };
     $("replayBtn").classList.add("active");
+});
+
+$("clearSubjects").addEventListener("click", async () => {
+    const button = $("clearSubjects");
+    button.disabled = true; button.classList.add("clearing"); button.textContent = "CLEARING…";
+    try {
+        const response = await fetch("/api/clear-subjects", { method: "POST" });
+        if (!response.ok) throw new Error("clear request failed");
+        S.prev = null; S.curr = null; S.snapshots = []; S.linked = null; S.lastEventId = 0;
+    } catch (error) {
+        console.error("Could not clear subjects", error);
+    } finally {
+        setTimeout(() => {
+            button.disabled = false; button.classList.remove("clearing"); button.textContent = "CLEAR SUBJECTS";
+        }, 450);
+    }
 });
 
 /* ---------------- main loop ---------------- */

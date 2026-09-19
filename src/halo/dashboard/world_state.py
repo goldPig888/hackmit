@@ -75,6 +75,21 @@ class WorldStateBuilder:
         }
         self._emit("HAPTIC ISSUED", ts_s, f"{direction} / {intensity}")
 
+    def reset(self) -> None:
+        """Clear visual histories, selected threats, events, and haptic state."""
+        self._pos_hist.clear()
+        self._px_hist.clear()
+        self._area_hist.clear()
+        self._events.clear()
+        self._risk_hist.clear()
+        self._known_ids.clear()
+        self._closing.clear()
+        self._conflict.clear()
+        self._cpa_flagged.clear()
+        self._was_turning = False
+        self._haptic = {"left": 0.0, "right": 0.0, "center": 0.0,
+                        "direction": None, "intensity": None, "ts": 0.0}
+
     def _emit(self, etype: str, ts: float, label: str,
               object_id: Optional[str] = None, risk: Optional[float] = None) -> None:
         self._event_seq += 1
@@ -185,6 +200,19 @@ class WorldStateBuilder:
                     px = self._world_to_pixel(pipeline, p)
                     px_pred.append(px if px else None)
 
+            # Phone pose calibration can temporarily make world re-projection
+            # unavailable. Keep the visual prediction legible by extrapolating
+            # the measured image-center motion in that case; this affects only
+            # rendering, never the collision calculation.
+            if pred is not None and bbox and (not px_pred or not any(px_pred)):
+                history = self._px_hist.get(oid)
+                if history and len(history) >= 2:
+                    t0, u0, v0 = history[0]
+                    t1, u1, v1 = history[-1]
+                    dt = max(t1 - t0, 1e-3)
+                    du, dv = (u1 - u0) / dt, (v1 - v0) / dt
+                    px_pred = [[float(u1 + du * t), float(v1 + dv * t)] for t in pred[0]]
+
             # risk / CPA from the pipeline's own assessor
             assess = risk_by_id.get(oid)
             risk = float(assess.probability) if assess else 0.0
@@ -266,7 +294,10 @@ class WorldStateBuilder:
                 "expanding": expanding,
                 "raw_px_rate": raw_px_rate,
             })
-            if risk > max_risk:
+            # Always expose one primary track to the visual console. Risk only
+            # controls its warning severity; it should not make the live
+            # overlay vanish between otherwise valid detection updates.
+            if primary is None or risk > max_risk:
                 max_risk = risk
                 primary = tracks[-1]
 

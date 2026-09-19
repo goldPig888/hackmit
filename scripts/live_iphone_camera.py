@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import sys
 import time
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -63,6 +64,19 @@ class IPhoneHaloProcessor:
         self.fps = 0.0
         self._last_status_push = 0.0
         self._last_cleanup = 0.0
+        self._clear_requested = threading.Event()
+
+    def request_clear_subjects(self) -> None:
+        """Schedule a reset; the CV thread performs it between frames."""
+        self._clear_requested.set()
+
+    def _clear_subjects(self) -> None:
+        self.pipeline.reset()
+        self.world_builder.reset()
+        self._intrinsics_set = False
+        self._last_cleanup = 0.0
+        self._clear_requested.clear()
+        print("Subjects cleared; acquiring a fresh tracking epoch.")
 
     def run(self) -> None:
         print("Waiting for phone stream... (open /phone on the iPhone)")
@@ -72,6 +86,8 @@ class IPhoneHaloProcessor:
                 time.sleep(0.01)
                 continue
             try:
+                if self._clear_requested.is_set():
+                    self._clear_subjects()
                 self._process(item[0], item[1])
             except Exception as e:
                 print(f"Frame processing error: {e}")
@@ -202,6 +218,36 @@ class IPhoneHaloProcessor:
         cv2.putText(frame, f"FPS {self.fps:.1f} | {imu_status}", (10, 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
+        # Bake a prominent status card into the JPEG itself. This is separate
+        # from the browser canvas so it remains visible in /video and on the
+        # console if a browser layout or canvas rendering issue occurs.
+        featured_det = None
+        featured_risk = None
+        if assessments:
+            featured_det, featured_risk = max(assessments, key=lambda pair: pair[1].risk)
+        elif detections:
+            featured_det = max(detections, key=lambda item: item.confidence)
+        if featured_det is not None:
+            risk_value = float(featured_risk.risk) if featured_risk else 0.0
+            is_conflict = risk_value >= 0.30
+            is_high = risk_value >= 0.70
+            accent = (0, 0, 235) if is_high else ((0, 185, 255) if is_conflict else (255, 220, 0))
+            title = "PREDICTED CONFLICT" if is_conflict else "TRACKING"
+            direction = featured_risk.direction.upper() if featured_risk else "PATH ACTIVE"
+            card_w = min(frame.shape[1] - 24, max(360, int(frame.shape[1] * 0.52)))
+            card_h = min(frame.shape[0] - 40, max(108, int(frame.shape[0] * 0.18)))
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (12, 38), (12 + card_w, 38 + card_h), (10, 12, 18), -1)
+            cv2.addWeighted(overlay, 0.84, frame, 0.16, 0, frame)
+            cv2.rectangle(frame, (12, 38), (12 + card_w, 38 + card_h), accent, 3)
+            cv2.putText(frame, title, (28, 72), cv2.FONT_HERSHEY_DUPLEX, 0.78, accent, 2)
+            label = featured_det.label.upper()
+            cv2.putText(frame, f"{label}  {direction}  {risk_value:.0%}", (28, 108),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.72, (245, 245, 245), 2)
+            if featured_risk and featured_risk.cpa_result.time_to_cpa is not None:
+                cv2.putText(frame, f"CPA {featured_risk.cpa_result.time_to_cpa:.1f}s", (28, 137),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.60, accent, 2)
+
         ok, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         if ok:
             self.receiver.set_processed_frame(enc.tobytes())
@@ -212,7 +258,16 @@ async def main_async(args) -> None:
     server = DashboardServer(streamer, port=args.port)
     runner = web.AppRunner(server.app)
     await runner.setup()
-    await web.TCPSite(runner, server.host, args.port).start()
+    try:
+        await web.TCPSite(runner, server.host, args.port).start()
+    except OSError as error:
+        await runner.cleanup()
+        if error.errno in {48, 98, 10048}:
+            raise RuntimeError(
+                f"Port {args.port} is already in use. HALO is likely still running; "
+                f"open http://localhost:{args.port}/demo, stop that process, or restart on "
+                f"another port with --port {args.port + 1}.") from None
+        raise
 
     loop = asyncio.get_running_loop()
     processor = IPhoneHaloProcessor(
@@ -223,6 +278,7 @@ async def main_async(args) -> None:
         hfov_deg=args.hfov,
         output_dir=args.output,
     )
+    server.set_clear_subjects_handler(processor.request_clear_subjects)
 
     print("=" * 60)
     print("HALO iPhone Stream")
@@ -251,6 +307,8 @@ def main() -> None:
         asyncio.run(main_async(args))
     except KeyboardInterrupt:
         print("\nStopped")
+    except RuntimeError as error:
+        print(f"\nCannot start HALO: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":
