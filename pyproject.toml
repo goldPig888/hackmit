@@ -12,6 +12,7 @@ dependencies = ["numpy>=2.0"]
 [project.optional-dependencies]
 vision = ["opencv-python>=4.10", "ultralytics>=8.3"]
 dashboard = ["aiohttp>=3.9", "aiohttp-cors"]
+advanced = ["scipy>=1.12"]
 dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]

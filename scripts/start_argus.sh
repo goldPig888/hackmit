@@ -12,6 +12,7 @@ ENABLE_OVERLAY=false
 ENABLE_TUNNEL=false
 TUNNEL_TYPE="quick"
 ENABLE_VISION=false
+ENABLE_ADVANCED=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -45,6 +46,10 @@ while [[ $# -gt 0 ]]; do
             ENABLE_VISION=true
             shift
             ;;
+        --advanced)
+            ENABLE_ADVANCED=true
+            shift
+            ;;
         --help)
             echo "ARGUS Unified Start Script"
             echo ""
@@ -58,6 +63,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --tunnel                Enable Cloudflare quick tunnel"
             echo "  --permanent-tunnel      Enable Cloudflare permanent tunnel"
             echo "  --vision                Install vision dependencies (opencv, ultralytics)"
+            echo "  --advanced              Install advanced pipeline dependencies (scipy)"
             echo "  --help                  Show this help message"
             echo ""
             echo "Examples:"
@@ -85,6 +91,7 @@ echo "  Dashboard: $ENABLE_DASHBOARD"
 echo "  Video Overlay: $ENABLE_OVERLAY"
 echo "  Cloudflare Tunnel: $ENABLE_TUNNEL ($TUNNEL_TYPE)"
 echo "  Vision Dependencies: $ENABLE_VISION"
+echo "  Advanced Pipeline: $ENABLE_ADVANCED"
 echo "=========================================="
 
 # Check if virtual environment exists
@@ -104,6 +111,12 @@ pip install -e '.[dashboard]' --quiet
 if [ "$ENABLE_VISION" = true ]; then
     echo "Installing vision dependencies..."
     pip install opencv-python ultralytics --quiet
+fi
+
+# Install advanced pipeline dependencies if requested
+if [ "$ENABLE_ADVANCED" = true ]; then
+    echo "Installing advanced pipeline dependencies..."
+    pip install scipy --quiet
 fi
 
 # Install opencv if overlay is enabled and not already installed
