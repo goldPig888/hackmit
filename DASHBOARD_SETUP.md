@@ -4,40 +4,43 @@ Complete remote monitoring solution with Cloudflare tunnel, live web dashboard, 
 
 ## 🚀 Quick Start
 
-### Option 1: Demo Mode (Recommended for Testing)
+### Default: Demo Dashboard
 ```bash
 cd /Users/mayespinola/Documents/hackmit
-bash scripts/start_monitoring.sh
-# Select option 1 for demo mode
+bash scripts/start_argus.sh
+```
+This starts the dashboard with simulated data by default.
+
+### Camera Mode with Video Overlay
+```bash
+bash scripts/start_argus.sh --source 0 --overlay
 ```
 
-### Option 2: Camera Mode
+### Full System with Remote Access
 ```bash
-bash scripts/start_monitoring.sh
-# Select option 2 for camera mode
+bash scripts/start_argus.sh --source 0 --overlay --tunnel
 ```
 
-### Option 3: Video Overlay Only
+### Custom Configuration
 ```bash
-bash scripts/start_monitoring.sh
-# Select option 3 for video overlay
+bash scripts/start_argus.sh --source /path/to/video.mp4 --port 9090 --overlay --tunnel
 ```
 
 ## 🌐 Cloudflare Tunnel Setup
 
-### Quick Tunnel (Temporary URL)
+### Quick Tunnel (Default)
 ```bash
-bash scripts/start_quick_tunnel.sh
+bash scripts/start_argus.sh --tunnel
 ```
 This creates a temporary public URL for testing without configuration.
 
-### Permanent Tunnel Setup
+### Permanent Tunnel
 ```bash
-# Setup tunnel
+# First setup the permanent tunnel
 bash scripts/setup_cloudflare_tunnel.sh
 
-# Start tunnel
-bash scripts/start_tunnel.sh
+# Then use it
+bash scripts/start_argus.sh --permanent-tunnel
 ```
 
 The permanent tunnel requires:
@@ -92,10 +95,14 @@ python scripts/video_overlay.py --source video.mp4 --no-trajectories --no-hazard
 ## 📱 Mobile Access
 
 ### Access Dashboard on Phone
-1. Start the dashboard: `bash scripts/start_monitoring.sh` (option 1 or 2)
-2. Start Cloudflare tunnel: `bash scripts/start_quick_tunnel.sh`
-3. Open the provided URL on your phone
-4. Dashboard is mobile-optimized with touch-friendly interface
+```bash
+# Start dashboard with tunnel for phone access
+bash scripts/start_argus.sh --tunnel
+
+# Or with camera and overlay
+bash scripts/start_argus.sh --source 0 --overlay --tunnel
+```
+Then open the provided Cloudflare URL on your phone. The dashboard is mobile-optimized with touch-friendly interface.
 
 ### Mobile Features
 - Responsive layout for different screen sizes
@@ -105,6 +112,20 @@ python scripts/video_overlay.py --source video.mp4 --no-trajectories --no-hazard
 - Real-time updates via SSE
 
 ## 🔧 Configuration
+
+### Command-Line Arguments
+```bash
+bash scripts/start_argus.sh --help
+```
+
+Available arguments:
+- `--source SOURCE` - Video source (demo, 0, /path/to/video.mp4) [default: demo]
+- `--port PORT` - Dashboard server port [default: 8080]
+- `--no-dashboard` - Disable dashboard server
+- `--overlay` - Enable video overlay
+- `--tunnel` - Enable Cloudflare quick tunnel
+- `--permanent-tunnel` - Enable Cloudflare permanent tunnel
+- `--vision` - Install vision dependencies (opencv, ultralytics)
 
 ### Dashboard Server Configuration
 Edit `scripts/run_dashboard.py` to customize:
@@ -130,10 +151,10 @@ Edit `.cloudflare/config.yml` to customize:
 
 ### Test Dashboard Locally
 ```bash
-# Start demo dashboard
-.venv/bin/python scripts/run_dashboard.py --source demo --port 8080
+# Start demo dashboard (default)
+bash scripts/start_argus.sh
 
-# Test endpoints
+# Test endpoints in another terminal
 curl http://localhost:8080/api/status
 curl http://localhost:8080/api/detections
 curl http://localhost:8080/api/hazards
@@ -141,17 +162,17 @@ curl http://localhost:8080/api/hazards
 
 ### Test Video Overlay
 ```bash
-# Test with mock detector
-.venv/bin/python scripts/video_overlay.py --source 0
+# Test with camera
+bash scripts/start_argus.sh --source 0 --overlay
 
 # Test with video file
-.venv/bin/python scripts/video_overlay.py --source path/to/video.mp4
+bash scripts/start_argus.sh --source /path/to/video.mp4 --overlay
 ```
 
 ### Test Cloudflare Tunnel
 ```bash
-# Start quick tunnel
-bash scripts/start_quick_tunnel.sh
+# Start dashboard with tunnel
+bash scripts/start_argus.sh --tunnel
 
 # Access the provided URL from your phone
 # Should see the same dashboard as local access
@@ -174,21 +195,32 @@ Camera/Video → Detection → ARGUS Pipeline → Risk Assessment
 ## 🎯 Use Cases
 
 ### 1. Local Development
+```bash
+bash scripts/start_argus.sh
+```
 - Run demo mode for testing
-- Use video overlay for local debugging
 - Access dashboard on localhost:8080
 
 ### 2. Remote Monitoring
+```bash
+bash scripts/start_argus.sh --source 0 --overlay --tunnel
+```
 - Start camera dashboard with real detection
 - Enable Cloudflare tunnel for phone access
 - Monitor from anywhere with internet
 
 ### 3. Field Testing
+```bash
+bash scripts/start_argus.sh --source 0 --overlay
+```
 - Use video overlay for real-time feedback
 - Record overlay frames for analysis
-- Monitor detection performance remotely
+- Monitor detection performance locally
 
 ### 4. Integration Testing
+```bash
+bash scripts/start_argus.sh --source /path/to/test_video.mp4 --overlay
+```
 - Test custom detectors with live data
 - Validate risk assessment algorithms
 - Test hazard detection patterns

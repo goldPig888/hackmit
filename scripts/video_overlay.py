@@ -239,7 +239,7 @@ class VideoOverlay:
             color = (0, 0, 255) if hazard.severity > 0.7 else \
                    (0, 165, 255) if hazard.severity > 0.4 else (255, 165, 0)
             
-            warning_text = f"! {hazard.hazard_type.upper()}: {hazard.description}"
+            warning_text = f"WARNING: {hazard.hazard_type.upper()}: {hazard.description}"
             
             # Draw warning background
             (text_width, text_height), _ = cv2.getTextSize(warning_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)

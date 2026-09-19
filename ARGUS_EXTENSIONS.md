@@ -285,14 +285,17 @@ All new components have been tested and are working:
 ## 🚀 Quick Start for Remote Monitoring
 
 ```bash
-# Start demo dashboard with simulated data
-bash scripts/start_monitoring.sh
-# Select option 1
+# Start everything with default settings (demo dashboard)
+bash scripts/start_argus.sh
 
-# Start Cloudflare tunnel for phone access
-bash scripts/start_quick_tunnel.sh
+# Start with camera, overlay, and tunnel for full remote monitoring
+bash scripts/start_argus.sh --source 0 --overlay --tunnel
 
-# Access the provided URL on your phone
+# Start with custom video file and specific port
+bash scripts/start_argus.sh --source /path/to/video.mp4 --port 9090 --overlay
+
+# For all options, run:
+bash scripts/start_argus.sh --help
 ```
 
 ## 📱 Mobile Access Features
