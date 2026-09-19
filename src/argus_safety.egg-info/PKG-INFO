@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: argus-safety
+Version: 0.1.0
+Summary: Predictive micromobility safety prototype
+Requires-Python: >=3.10
+Requires-Dist: numpy>=2.0
+Provides-Extra: vision
+Requires-Dist: opencv-python>=4.10; extra == "vision"
+Requires-Dist: ultralytics>=8.3; extra == "vision"
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
