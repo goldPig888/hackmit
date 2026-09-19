@@ -17,7 +17,7 @@ This is a hackathon prototype, **not a certified safety system**. Its risk thres
 
 The demo needs no camera, YOLO model, or hardware. It simulates an approaching, crossing car and writes newline-delimited haptic events to `runs/demo/haptics.jsonl`.
 
-For a real video/camera after installing optional vision dependencies:
+For a real video/camera, first install the optional vision dependencies and cache the model:
 
 ```bash
 ./scripts/03_download_models.sh
