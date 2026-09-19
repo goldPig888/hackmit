@@ -50,6 +50,10 @@ while [[ $# -gt 0 ]]; do
             ENABLE_ADVANCED=true
             shift
             ;;
+        --live-camera)
+            ENABLE_LIVE_CAMERA=true
+            shift
+            ;;
         --help)
             echo "ARGUS Unified Start Script"
             echo ""
@@ -64,6 +68,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --permanent-tunnel      Enable Cloudflare permanent tunnel"
             echo "  --vision                Install vision dependencies (opencv, ultralytics)"
             echo "  --advanced              Install advanced pipeline dependencies (scipy)"
+            echo "  --live-camera           Start live camera with dashboard"
             echo "  --help                  Show this help message"
             echo ""
             echo "Examples:"
@@ -92,6 +97,7 @@ echo "  Video Overlay: $ENABLE_OVERLAY"
 echo "  Cloudflare Tunnel: $ENABLE_TUNNEL ($TUNNEL_TYPE)"
 echo "  Vision Dependencies: $ENABLE_VISION"
 echo "  Advanced Pipeline: $ENABLE_ADVANCED"
+echo "  Live Camera: $ENABLE_LIVE_CAMERA"
 echo "=========================================="
 
 # Check if virtual environment exists
@@ -119,15 +125,35 @@ if [ "$ENABLE_ADVANCED" = true ]; then
     pip install scipy --quiet
 fi
 
-# Install opencv if overlay is enabled and not already installed
-if [ "$ENABLE_OVERLAY" = true ] && ! python -c "import cv2" 2>/dev/null; then
-    echo "Installing opencv-python for video overlay..."
-    pip install opencv-python --quiet
+# Install vision dependencies if live camera is enabled
+if [ "$ENABLE_LIVE_CAMERA" = true ]; then
+    echo "Installing vision dependencies for live camera..."
+    pip install opencv-python ultralytics --quiet
 fi
 
 # Create necessary directories
 mkdir -p runs/overlays
 mkdir -p dashboard_static
+
+# Start live camera with dashboard if enabled
+if [ "$ENABLE_LIVE_CAMERA" = true ]; then
+    echo "Starting live camera with dashboard..."
+    python scripts/live_camera_with_dashboard.py --camera "$SOURCE" --port "$PORT" &
+    CAMERA_PID=$!
+    echo "Live camera started (PID: $CAMERA_PID)"
+    echo "Dashboard: http://localhost:$PORT"
+    echo "Press Ctrl+C to stop"
+    
+    # Wait for camera process
+    wait $CAMERA_PID
+    exit 0
+fi
+
+# Install opencv if overlay is enabled and not already installed
+if [ "$ENABLE_OVERLAY" = true ] && ! python -c "import cv2" 2>/dev/null; then
+    echo "Installing opencv-python for video overlay..."
+    pip install opencv-python --quiet
+fi
 
 # Function to cleanup background processes
 cleanup() {

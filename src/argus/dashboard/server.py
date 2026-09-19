@@ -39,6 +39,7 @@ class DashboardServer:
             web.get('/api/detections', self.get_detections),
             web.get('/api/hazards', self.get_hazards),
             web.get('/stream', self.sse_stream),
+            web.get('/video', self.video_stream),
             web.get('/ws', self.websocket_handler),
             web.static('/static', self._get_static_dir())
         ])
@@ -115,6 +116,40 @@ class DashboardServer:
             self.websocket_clients.discard(ws)
         
         return ws
+
+    async def video_stream(self, request: Request) -> Response:
+        """MJPEG video stream endpoint.
+        
+        This endpoint provides a live video feed that can be embedded
+        in the dashboard HTML for viewing from a phone.
+        """
+        response = web.StreamResponse()
+        response.content_type = 'multipart/x-mixed-replace; boundary=frame'
+        
+        await response.prepare(request)
+        
+        # This is a placeholder - in the actual implementation,
+        # the LiveCameraDashboard would need to share its frames
+        # with the server. For now, we'll return a simple message.
+        
+        boundary = b'--frame\r\n'
+        
+        try:
+            while True:
+                # In real implementation, get frame from shared buffer
+                # For now, send a placeholder
+                frame_data = b''
+                
+                await response.write(boundary)
+                await response.write(b'Content-Type: image/jpeg\r\n\r\n')
+                await response.write(frame_data)
+                await response.write(b'\r\n')
+                
+                await asyncio.sleep(0.033)  # ~30 FPS
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
+        
+        return response
 
     async def broadcast_to_websockets(self, message: dict) -> None:
         """Broadcast message to all connected WebSocket clients.
