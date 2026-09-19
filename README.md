@@ -1,6 +1,6 @@
-# ARGUS — Predictive Micromobility Safety Prototype
+# HALO — Predictive Micromobility Safety Prototype
 
-ARGUS turns rear-camera detections and phone motion into interpretable collision-risk events:
+HALO turns rear-camera detections and phone motion into interpretable collision-risk events:
 
 `detection → temporal state → TTC gate → future paths → conflict → directional haptic event`
 
@@ -26,16 +26,29 @@ For a real video/camera, first install the optional vision dependencies and cach
 ./scripts/05_run_camera.sh 0
 ```
 
+## iPhone live stream (real IMU)
+
+The advanced pipeline's camera-rotation compensation needs real IMU data. An iPhone provides it via Safari — no app install:
+
+```bash
+.venv/bin/python scripts/live_iphone_camera.py          # starts server on :8080
+./scripts/start_halo.sh --iphone --tunnel              # or via the launcher + HTTPS tunnel
+```
+
+Then open `https://<tunnel-host>/phone` on the iPhone (iOS requires HTTPS for camera + motion access) and tap **Start HALO**. The page streams JPEG frames + gyro/accel/orientation over `/ingest`; the Mac runs detection and feeds the real pose into `AdvancedHaloPipeline`. Watch annotated output at `http://localhost:8080/video`.
+
+Calibration notes: keep the preview on the phone page upright as held (use the rotate buttons if it looks sideways — the camera extrinsic assumes display-upright pixels). `--hfov` tunes the assumed lens FOV (default 75°).
+
 To forward output to an ESP32 HTTP endpoint:
 
 ```bash
-ARGUS_HAPTIC_URL=http://192.168.4.1/haptic ./scripts/05_run_camera.sh 0
+HALO_HAPTIC_URL=http://192.168.4.1/haptic ./scripts/05_run_camera.sh 0
 ```
 
 ## Repository layout
 
 - `scripts/` — executable, numbered Bash entry points.
-- `src/argus/` — reusable library; it has no coupling to a camera or ESP32.
+- `src/halo/` — reusable library; it has no coupling to a camera or ESP32.
 - `tests/` — deterministic checks of TTC, conflict, and directional risk behavior.
 - `runs/` — generated recordings, ignored by Git.
 
@@ -49,4 +62,4 @@ The core world model uses meters: rider is at `(0, 0)`, forward is positive `y`,
 {"direction":"left","risk":0.82,"ttc_s":1.9,"conflict_s":1.6,"object_id":"car-12"}
 ```
 
-`direction` is the side where the threat lies (`left`, `right`, or `center`). The HTTP transport uses a POST of this JSON; without `ARGUS_HAPTIC_URL`, events are safely recorded locally.
+`direction` is the side where the threat lies (`left`, `right`, or `center`). The HTTP transport uses a POST of this JSON; without `HALO_HAPTIC_URL`, events are safely recorded locally.

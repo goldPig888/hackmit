@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ARGUS Video Overlay - Real-time overlays on video feed."""
+"""HALO Video Overlay - Real-time overlays on video feed."""
 
 import sys
 import argparse
@@ -8,17 +8,17 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus import ArgusPipeline
-from argus.detectors import YOLODetector
-from argus.hazards import SyncHazardDetector
-from argus.models import Detection, TrackState
+from halo import HaloPipeline
+from halo.detectors import YOLODetector
+from halo.hazards import SyncHazardDetector
+from halo.models import Detection, TrackState
 import cv2
 import time
 import numpy as np
 
 
 class VideoOverlay:
-    """Real-time video overlay system for ARGUS."""
+    """Real-time video overlay system for HALO."""
 
     def __init__(self, source: str = "0", show_trajectories: bool = True, 
                  show_risk: bool = True, show_hazards: bool = True):
@@ -35,7 +35,7 @@ class VideoOverlay:
         self.show_risk = show_risk
         self.show_hazards = show_hazards
         
-        self.pipeline = ArgusPipeline()
+        self.pipeline = HaloPipeline()
         self.sync_detector = SyncHazardDetector()
         self.detector = None
         self.total_detections = 0
@@ -99,7 +99,7 @@ class VideoOverlay:
                 frame = self._apply_overlays(frame, overlay_data, hazards, timestamp)
 
                 # Display frame
-                cv2.imshow("ARGUS Video Overlay", frame)
+                cv2.imshow("HALO Video Overlay", frame)
 
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
@@ -174,7 +174,7 @@ class VideoOverlay:
     def _overlay_trajectory(self, frame, assessment):
         """Overlay predicted trajectory."""
         try:
-            from argus.trajectory import predict_path
+            from halo.trajectory import predict_path
             import numpy as np
             
             # Get predicted path
@@ -295,7 +295,7 @@ class VideoOverlay:
                 self.count = 0
             
             def detect(self, frame, timestamp_s):
-                from argus.models import Detection
+                from halo.models import Detection
                 self.count += 1
                 return [Detection(
                     object_id=f"mock-{self.count}",
@@ -330,7 +330,7 @@ class VideoOverlay:
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="ARGUS Video Overlay")
+    parser = argparse.ArgumentParser(description="HALO Video Overlay")
     parser.add_argument("--source", default="0", help="Video source (camera index or video file)")
     parser.add_argument("--no-trajectories", action="store_true", help="Hide trajectory overlays")
     parser.add_argument("--no-risk", action="store_true", help="Hide risk overlays")

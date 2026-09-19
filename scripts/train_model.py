@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Model training and fine-tuning utilities for ARGUS."""
+"""Model training and fine-tuning utilities for HALO."""
 
 import sys
 import argparse
@@ -8,7 +8,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus.fine_tuning import ModelTrainer, YOLOTrainer, TrainingConfig, DataLoader, DatasetFormat
+from halo.fine_tuning import ModelTrainer, YOLOTrainer, TrainingConfig, DataLoader, DatasetFormat
 
 
 def prepare_dataset(dataset_path: str, output_path: str | None = None):
@@ -95,8 +95,8 @@ def evaluate_model(model_path: str, test_data_path: str):
     print(f"Evaluating model: {model_path}")
     print(f"  Test dataset: {test_data_path}")
     
-    from argus.fine_tuning import ModelEvaluator
-    from argus.detectors import YOLODetector
+    from halo.fine_tuning import ModelEvaluator
+    from halo.detectors import YOLODetector
     
     # Create detector with trained model
     detector = YOLODetector(model_path=model_path)
@@ -117,7 +117,7 @@ def evaluate_model(model_path: str, test_data_path: str):
 
 def main():
     """Main training CLI."""
-    parser = argparse.ArgumentParser(description="ARGUS Model Training Utilities")
+    parser = argparse.ArgumentParser(description="HALO Model Training Utilities")
     subparsers = parser.add_subparsers(dest="command", required=True)
     
     # Prepare dataset command

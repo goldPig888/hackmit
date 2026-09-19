@@ -1,4 +1,4 @@
-# Advanced ARGUS Architecture - Camera-Frame Realignment
+# Advanced HALO Architecture - Camera-Frame Realignment
 
 ## Overview
 
@@ -6,7 +6,7 @@ This document describes the advanced camera-frame realignment architecture imple
 
 ## The Problem
 
-In the original ARGUS implementation:
+In the original HALO implementation:
 - Objects were tracked in raw pixel coordinates
 - When you rotate your phone left, a stationary car appears to move right
 - The system would incorrectly conclude "CAR MOVED RIGHT! Increased risk!"
@@ -23,7 +23,7 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 
 ## New Components
 
-### 1. IMU Integration (`src/argus/imu/`)
+### 1. IMU Integration (`src/halo/imu/`)
 
 **IMUProcessor**: Process gyroscope and accelerometer data
 - Quaternion integration for orientation tracking
@@ -41,15 +41,15 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 - Track bearing and elevation (not pixels)
 - Calculate bearing rates for motion analysis
 
-### 2. Stabilized World Frame Tracking (`src/argus/tracking/`)
+### 2. Stabilized World Frame Tracking (`src/halo/tracking/`)
 
-**WorldFrameTracker**: Track objects in ARGUS frame
+**WorldFrameTracker**: Track objects in HALO frame
 - Coordinate frame: +Y = forward, +X = right, +Z = up
 - Depth estimation from bbox size
 - Ego-motion separation: `v_object = v_observed - v_ego`
 - Persistent tracking in stable coordinates
 
-**ObjectState**: Object state in ARGUS frame
+**ObjectState**: Object state in HALO frame
 - Position: [X, Y, Z] (meters)
 - Velocity: [Vx, Vy, Vz] (m/s)
 - Bearing/elevation (radians)
@@ -62,7 +62,7 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 - GPS support (optional)
 - Turn detection
 
-### 3. CPA-Based Collision Detection (`src/argus/collision/`)
+### 3. CPA-Based Collision Detection (`src/halo/collision/`)
 
 **CPADetector**: Closest Point of Approach calculation
 - **Math**: `t_CPA = -(r_0 · v_rel) / ||v_rel||^2`
@@ -76,7 +76,7 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 - Threat direction determination
 - Contributing factor analysis
 
-### 4. Extended Kalman Filter (`src/argus/filters/`)
+### 4. Extended Kalman Filter (`src/halo/filters/`)
 
 **ExtendedKalmanFilter**: Nonlinear state estimation
 - State: [X, Y, Z, Vx, Vy, Vz]
@@ -89,7 +89,7 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 - No Jacobian calculation needed
 - More robust for highly nonlinear systems
 
-### 5. Visual-Inertial Odometry (`src/argus/vio/`)
+### 5. Visual-Inertial Odometry (`src/halo/vio/`)
 
 **VisualOdometryEstimator**: Visual ego-motion from background features
 - ORB feature detection
@@ -102,9 +102,9 @@ Perception → Ego-motion compensation → World-space tracking → Prediction
 - Confidence weighting
 - Temporal smoothing
 
-### 6. Advanced Pipeline (`src/argus/advanced_pipeline.py`)
+### 6. Advanced Pipeline (`src/halo/advanced_pipeline.py`)
 
-**AdvancedArgusPipeline**: Complete advanced system
+**AdvancedHaloPipeline**: Complete advanced system
 - Configurable features (IMU, VIO, EKF, CPA)
 - Full integration of all components
 - Backward-compatible with legacy API
@@ -125,7 +125,7 @@ YOLO → ByteTrack → pixel coords → simple projection → Kalman → risk
 ```python
 YOLO → ByteTrack → IMU compensation → world frame → EKF → CPA → risk
 ```
-- Tracks in stable ARGUS frame
+- Tracks in stable HALO frame
 - Camera rotation ≠ object motion
 - CPA-based collision reasoning
 - Explicit uncertainty propagation
@@ -188,7 +188,7 @@ object observations                  │
 
 ### Basic Usage
 ```python
-from argus import AdvancedArgusPipeline, AdvancedPipelineConfig
+from halo import AdvancedHaloPipeline, AdvancedPipelineConfig
 
 # Create configuration
 config = AdvancedPipelineConfig(
@@ -199,7 +199,7 @@ config = AdvancedPipelineConfig(
 )
 
 # Initialize pipeline
-pipeline = AdvancedArgusPipeline(config)
+pipeline = AdvancedHaloPipeline(config)
 
 # Update with detection and IMU data
 risk_assessment = pipeline.update(
@@ -222,7 +222,7 @@ risk_assessment = pipeline.update(
 pip install scipy
 
 # Or use the unified script
-bash scripts/start_argus.sh --advanced
+bash scripts/start_halo.sh --advanced
 ```
 
 ## Mathematical Foundation
@@ -299,7 +299,7 @@ All 7 advanced pipeline tests passing:
 
 ## Comparison to Lim et al. Paper
 
-| Aspect | Lim et al. | ARGUS Advanced |
+| Aspect | Lim et al. | HALO Advanced |
 |--------|-----------|----------------|
 | Frame | 2D pixels | Stabilized world frame |
 | Ego motion | IMU lean only | IMU + optional VIO |

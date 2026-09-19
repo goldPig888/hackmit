@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HALO Phone Stream</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0a0e27;
+        color: #e0e6ed;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 20px;
+    }
+    h1 { color: #00ff88; font-size: 1.4em; margin-bottom: 8px; }
+    .tip { color: #8892b0; font-size: 0.85em; text-align: center; max-width: 420px; margin-bottom: 16px; }
+    #startBtn {
+        background: #00ff88; color: #0a0e27; border: none; border-radius: 8px;
+        font-size: 1.2em; font-weight: bold; padding: 16px 40px; margin: 12px 0;
+    }
+    #startBtn:disabled { background: #1a2332; color: #8892b0; }
+    .status { font-size: 0.85em; color: #8892b0; margin: 6px 0; }
+    .status b { color: #00ff88; }
+    canvas { max-width: 100%; border: 1px solid #1a2332; border-radius: 8px; margin-top: 10px; }
+    .rot-controls { margin-top: 8px; font-size: 0.85em; color: #8892b0; }
+    .rot-controls button {
+        background: #121826; color: #e0e6ed; border: 1px solid #1a2332;
+        border-radius: 6px; padding: 8px 14px; margin: 0 4px; font-size: 1em;
+    }
+    video { display: none; }
+</style>
+</head>
+<body>
+<h1>HALO Phone Stream</h1>
+<p class="tip">Tap Start, allow camera + motion access, then hold the phone like a rear dashcam — camera pointing where you're headed. This page must be opened over HTTPS.</p>
+
+<button id="startBtn">Start HALO</button>
+<div class="status" id="wsStatus">WebSocket: <b>idle</b></div>
+<div class="status" id="camStatus">Camera: <b>off</b></div>
+<div class="status" id="imuStatus">IMU: <b>off</b></div>
+<div class="status" id="statStatus">Frames sent: <b>0</b> | IMU sent: <b>0</b></div>
+
+<video id="vid" playsinline muted autoplay></video>
+<canvas id="out"></canvas>
+
+<div class="rot-controls">
+    Preview sideways? Fix: <button id="rotLeft">↺</button><button id="rotRight">↻</button>
+</div>
+
+<script>
+const FRAME_INTERVAL_MS = 100;   // ~10 fps
+const JPEG_QUALITY = 0.6;
+const TARGET_WIDTH = 640;
+
+// Extra rotation applied to the sent image. If the preview looks sideways on
+// your phone, tap the rotate buttons until it looks upright — the server keys
+// its camera extrinsic off screen orientation, so the image MUST be upright
+// as held for bearings to be correct.
+let rotFix = 0;
+
+let ws = null;
+let video = document.getElementById('vid');
+let out = document.getElementById('out');
+let ctx = out.getContext('2d');
+let framesSent = 0, imuSent = 0;
+
+let latestOri = [0, 0, 0];
+let screenAngle = 0;
+
+function getScreenAngle() {
+    let a = (screen.orientation && screen.orientation.angle != null)
+        ? screen.orientation.angle
+        : (window.orientation || 0);
+    if (a < 0) a += 360;   // normalize -90 -> 270
+    return Math.round(a / 90) * 90 % 360;
+}
+
+function wsUrl() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return proto + '//' + location.host + '/ingest';
+}
+
+async function start() {
+    document.getElementById('startBtn').disabled = true;
+
+    // iOS 13+ requires explicit motion-sensor permission from a user gesture
+    try {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            await DeviceMotionEvent.requestPermission();
+        }
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            await DeviceOrientationEvent.requestPermission();
+        }
+    } catch (e) {
+        console.log('Motion permission:', e);
+    }
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        document.getElementById('camStatus').innerHTML = 'Camera: <b>on</b>';
+    } catch (e) {
+        document.getElementById('camStatus').innerHTML = 'Camera: <b>FAILED - ' + e.name + '</b>';
+        return;
+    }
+
+    function connect() {
+        ws = new WebSocket(wsUrl());
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => document.getElementById('wsStatus').innerHTML = 'WebSocket: <b>connected</b>';
+        ws.onclose = () => {
+            document.getElementById('wsStatus').innerHTML = 'WebSocket: <b>closed — reconnecting…</b>';
+            setTimeout(connect, 2000);
+        };
+        ws.onerror = () => document.getElementById('wsStatus').innerHTML = 'WebSocket: <b>error</b>';
+    }
+    connect();
+
+    window.addEventListener('deviceorientation', (e) => {
+        // Prefer compass-referenced heading so the world frame is stable
+        const alpha = (e.webkitCompassHeading != null) ? 360 - e.webkitCompassHeading : (e.alpha || 0);
+        latestOri = [alpha, e.beta || 0, e.gamma || 0];
+    });
+    window.addEventListener('deviceorientationabsolute', (e) => {
+        latestOri = [e.alpha || 0, e.beta || 0, e.gamma || 0];
+    });
+    window.addEventListener('devicemotion', (e) => {
+        const r = e.rotationRate || {};
+        const a = e.accelerationIncludingGravity || {};
+        screenAngle = getScreenAngle();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'imu',
+                ts: performance.now(),
+                rot: [r.alpha || 0, r.beta || 0, r.gamma || 0],   // deg/s, device frame
+                accel: [a.x || 0, a.y || 0, a.z || 0],            // m/s^2
+                ori: latestOri,                                   // alpha, beta, gamma deg
+                screen: screenAngle
+            }));
+            imuSent++;
+        }
+    });
+    document.getElementById('imuStatus').innerHTML = 'IMU: <b>on</b>';
+
+    setInterval(sendFrame, FRAME_INTERVAL_MS);
+    setInterval(updateStats, 500);
+}
+
+function sendFrame() {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !video.videoWidth) return;
+
+    const vw = video.videoWidth, vh = video.videoHeight;
+    // Normalize the image to display orientation. Raw getUserMedia frames come
+    // in sensor orientation (landscape); rotate so the image is upright as held.
+    const rot = ((90 - screenAngle + rotFix) % 360 + 360) % 360;
+    const swap = (rot === 90 || rot === 270);
+
+    const scale = TARGET_WIDTH / (swap ? vh : vw);
+    out.width = Math.round((swap ? vh : vw) * scale);
+    out.height = Math.round((swap ? vw : vh) * scale);
+
+    ctx.save();
+    ctx.translate(out.width / 2, out.height / 2);
+    ctx.rotate(rot * Math.PI / 180);
+    ctx.scale(scale, scale);
+    ctx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+    ctx.restore();
+
+    const dataUrl = out.toDataURL('image/jpeg', JPEG_QUALITY);
+    const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    const bin = atob(b64);
+    const n = bin.length;
+    const buf = new ArrayBuffer(8 + n);
+    const dv = new DataView(buf);
+    dv.setFloat64(0, performance.now());
+    const u8 = new Uint8Array(buf, 8);
+    for (let i = 0; i < n; i++) u8[i] = bin.charCodeAt(i);
+    ws.send(buf);
+    framesSent++;
+}
+
+function updateStats() {
+    document.getElementById('statStatus').innerHTML =
+        'Frames sent: <b>' + framesSent + '</b> | IMU sent: <b>' + imuSent + '</b>';
+}
+
+document.getElementById('startBtn').addEventListener('click', start);
+document.getElementById('rotLeft').addEventListener('click', () => { rotFix = (rotFix + 270) % 360; });
+document.getElementById('rotRight').addEventListener('click', () => { rotFix = (rotFix + 90) % 360; });
+</script>
+</body>
+</html>

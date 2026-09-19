@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HALO — Predictive Safety Console</title>
+<link rel="stylesheet" href="/static/console.css">
+</head>
+<body>
+<header id="topbar">
+    <div class="brand">HALO<span class="live-dot"></span><span class="live-text">LIVE</span></div>
+    <div class="pills">
+        <div class="pill"><span>FPS</span><b id="stFps">--</b></div>
+        <div class="pill" id="stCam"><span>CAM</span><b>--</b></div>
+        <div class="pill" id="stImu"><span>IMU</span><b>--</b></div>
+        <div class="pill"><span>TRK</span><b id="stTrk">0</b></div>
+        <div class="pill" id="stHap"><span>HAPTIC</span><b>--</b></div>
+        <div class="pill wm" id="stWm"><b>WORLD MODEL: --</b></div>
+    </div>
+</header>
+
+<main>
+    <!-- LEFT: what HALO sees now -->
+    <section id="camPanel">
+        <div class="panel-head">
+            <span class="ph-label">NOW · CAMERA</span>
+            <span id="stabTag" class="stab-tag">STABILIZATION ACTIVE</span>
+            <button id="stabToggle" title="Toggle raw vs stabilized trails">STAB</button>
+        </div>
+        <div class="cam-wrap" id="camWrap">
+            <canvas id="camOverlay"></canvas>
+            <div class="cam-hud" id="camHud">YAW -- · PITCH -- · ROLL --</div>
+            <div class="cam-nofeed" id="camNoFeed">WAITING FOR PHONE STREAM — open /phone on iPhone</div>
+        </div>
+        <div class="funnel" id="funnel"></div>
+    </section>
+
+    <!-- RIGHT: what HALO predicts -->
+    <section id="worldPanel">
+        <div class="panel-head">
+            <span class="ph-label">NEXT · PREDICTED WORLD</span>
+            <span class="ph-sub">top-down · rider-relative</span>
+        </div>
+        <canvas id="worldCanvas"></canvas>
+        <div class="world-foot">
+            <button id="replayBtn">◂ REPLAY LAST 8s</button>
+            <span id="worldScale">range -- m</span>
+        </div>
+    </section>
+
+    <!-- THREAT RAIL -->
+    <aside id="threatRail">
+        <div class="rail-block threat-card" id="threatCard">
+            <div class="rail-label">PRIMARY THREAT</div>
+            <div class="threat-id" id="thId">—</div>
+            <div class="threat-dir" id="thDir">—</div>
+            <div class="risk-big"><span id="thRisk">0</span><small>/100</small></div>
+            <div class="risk-bar"><div id="thRiskBar"></div></div>
+            <div class="kv"><span>TTC</span><b id="thTtc">—</b></div>
+            <div class="kv"><span>t→CPA</span><b id="thTcpa">—</b></div>
+            <div class="kv"><span>d@CPA</span><b id="thDcpa">—</b></div>
+            <div class="kv"><span>closing</span><b id="thClose">—</b></div>
+            <div class="kv"><span>pred conf</span><b id="thConf">—</b></div>
+        </div>
+
+        <div class="rail-block">
+            <div class="rail-label">HAPTIC</div>
+            <div class="hap-row"><span>L</span><div class="hap-bar"><div id="hapL"></div></div></div>
+            <div class="hap-row"><span>R</span><div class="hap-bar"><div id="hapR"></div></div></div>
+        </div>
+
+        <div class="rail-block">
+            <div class="rail-label">WHY HALO WARNED</div>
+            <ul id="whyList" class="why-list"><li class="dim">no active threat</li></ul>
+        </div>
+
+        <div class="rail-block">
+            <div class="rail-label">COUNTERFACTUAL</div>
+            <div class="kv"><span>current path CPA</span><b id="cfCur">—</b></div>
+            <div class="kv"><span>if straight CPA</span><b id="cfStr">—</b></div>
+            <div class="kv"><span>Δ risk</span><b id="cfDelta">—</b></div>
+        </div>
+
+        <div class="rail-block">
+            <div class="rail-label">EGO-MOTION CHECK</div>
+            <div class="diag-row"><span>raw px</span><div class="diag-bar"><div id="dgRaw"></div></div></div>
+            <div class="diag-row"><span>camera</span><div class="diag-bar"><div id="dgCam"></div></div></div>
+            <div class="diag-row"><span>stabilized</span><div class="diag-bar"><div id="dgStab"></div></div></div>
+        </div>
+    </aside>
+</main>
+
+<footer id="timelinePanel">
+    <div class="panel-head"><span class="ph-label">TEMPORAL LOG</span></div>
+    <canvas id="timelineCanvas"></canvas>
+    <div id="eventFeed"></div>
+</footer>
+
+<div id="demoBadge" hidden>SYNTHETIC DEMO DATA</div>
+<div id="emptyState" hidden>
+    <div>WAITING FOR WORLD STATE</div>
+    <div class="sub">start live_iphone_camera.py and connect the phone — or append <code>?demo</code> to preview</div>
+</div>
+
+<script src="/static/console.js"></script>
+</body>
+</html>

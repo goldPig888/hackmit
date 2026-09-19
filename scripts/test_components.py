@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test individual ARGUS pipeline components."""
+"""Test individual HALO pipeline components."""
 
 import sys
 from pathlib import Path
@@ -7,8 +7,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus.testing import ComponentTester, MockDetectionGenerator
-from argus.models import Detection
+from halo.testing import ComponentTester, MockDetectionGenerator
+from halo.models import Detection
 
 
 def test_geometry():
@@ -107,7 +107,7 @@ def test_full_component_suite():
 def main():
     """Run all component tests."""
     print("=" * 60)
-    print("ARGUS Component Testing Suite")
+    print("HALO Component Testing Suite")
     print("=" * 60)
     
     try:

@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "=========================================="
-echo "ARGUS Cloudflare Tunnel Setup"
+echo "HALO Cloudflare Tunnel Setup"
 echo "=========================================="
 
 # Check if cloudflared is installed
@@ -43,7 +43,7 @@ fi
 # Create new tunnel if needed
 if [ ! -f "$TUNNEL_DIR/tunnel.json" ]; then
     echo "Creating new Cloudflare tunnel..."
-    cloudflared tunnel create argus-monitoring --config "$TUNNEL_DIR/config.yml"
+    cloudflared tunnel create halo-monitoring --config "$TUNNEL_DIR/config.yml"
     TUNNEL_ID=$(jq -r '.tunnel' "$TUNNEL_DIR/tunnel.json")
     echo "Created tunnel: $TUNNEL_ID"
 fi
@@ -54,7 +54,7 @@ tunnel: $(jq -r '.tunnel' "$TUNNEL_DIR/tunnel.json")
 credentials-file: $TUNNEL_DIR/credentials.json
 
 ingress:
-  - hostname: argus-monitoring.your-domain.com
+  - hostname: halo-monitoring.your-domain.com
     service: http://localhost:8080
   - service: http_status:404
 EOF

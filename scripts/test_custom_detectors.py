@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test custom detection models with ARGUS pipeline."""
+"""Test custom detection models with HALO pipeline."""
 
 import sys
 from pathlib import Path
@@ -7,9 +7,9 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus.detectors import DetectorRegistry, YOLODetector, WeaponsDetector
-from argus.testing import PipelineTester, MockDetectionGenerator
-from argus.pipeline import ArgusPipeline
+from halo.detectors import DetectorRegistry, YOLODetector, WeaponsDetector
+from halo.testing import PipelineTester, MockDetectionGenerator
+from halo.pipeline import HaloPipeline
 
 
 def test_detector_registry():
@@ -52,7 +52,7 @@ def test_yolo_detector_with_mock_data():
             self.detection_count = 0
         
         def detect(self, frame, timestamp_s):
-            from argus.models import Detection
+            from halo.models import Detection
             self.detection_count += 1
             # Simulate detection
             return [Detection(
@@ -114,7 +114,7 @@ def test_pipeline_with_custom_detector():
             self.frame_count = 0
         
         def detect(self, frame, timestamp_s):
-            from argus.models import Detection
+            from halo.models import Detection
             self.frame_count += 1
             
             # Simulate different detection scenarios
@@ -168,8 +168,8 @@ def test_sync_hazard_detection():
     """Test synchronized hazard detection."""
     print("\nTesting Synchronized Hazard Detection...")
     
-    from argus.hazards import SyncHazardDetector
-    from argus.models import TrackState
+    from halo.hazards import SyncHazardDetector
+    from halo.models import TrackState
     import numpy as np
     
     detector = SyncHazardDetector()
@@ -213,7 +213,7 @@ def test_sync_hazard_detection():
 def main():
     """Run all custom detector tests."""
     print("=" * 60)
-    print("ARGUS Custom Detector Testing Suite")
+    print("HALO Custom Detector Testing Suite")
     print("=" * 60)
     
     try:

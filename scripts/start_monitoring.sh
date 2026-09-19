@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "=========================================="
-echo "ARGUS Remote Monitoring Setup"
+echo "HALO Remote Monitoring Setup"
 echo "=========================================="
 
 # Check if virtual environment exists

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test the advanced ARGUS pipeline with camera-frame realignment."""
+"""Test the advanced HALO pipeline with camera-frame realignment."""
 
 import sys
 from pathlib import Path
@@ -7,14 +7,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
 import time
-from argus import (
-    AdvancedArgusPipeline, AdvancedPipelineConfig,
+from halo import (
+    AdvancedHaloPipeline, AdvancedPipelineConfig,
     IMUProcessor, CameraPoseEstimator, RotationCompensator,
     WorldFrameTracker, ObjectState, EgoTracker,
     CPADetector, CollisionRiskAssessor, RiskLevel, CollisionRiskAssessment,
     ExtendedKalmanFilter
 )
-from argus.models import Detection
+from halo.models import Detection
 
 
 def test_imu_integration():
@@ -258,7 +258,7 @@ def test_full_advanced_pipeline():
     )
     
     # Initialize pipeline
-    pipeline = AdvancedArgusPipeline(config)
+    pipeline = AdvancedHaloPipeline(config)
     
     print(f"✓ Advanced pipeline created")
     print(f"✓ IMU compensation: {config.enable_imu_compensation}")
@@ -324,7 +324,7 @@ def main():
     """Run all tests."""
     print("\n")
     print("╔" + "=" * 58 + "╗")
-    print("║" + " " * 10 + "ARGUS Advanced Pipeline Tests" + " " * 18 + "║")
+    print("║" + " " * 10 + "HALO Advanced Pipeline Tests" + " " * 18 + "║")
     print("╚" + "=" * 58 + "╝")
     print()
     

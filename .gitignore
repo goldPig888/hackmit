@@ -5,3 +5,5 @@ __pycache__/
 runs/
 models/
 *.pt
+.DS_Store
+*.egg-info/

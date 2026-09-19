@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "ARGUS environment check"
+echo "HALO environment check"
 command -v python3 >/dev/null || { echo "Python 3 is required." >&2; exit 1; }
 python3 - <<'PY'
 import sys

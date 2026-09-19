@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 echo "=========================================="
-echo "ARGUS Quick Cloudflare Tunnel"
+echo "HALO Quick Cloudflare Tunnel"
 echo "=========================================="
 echo "This will create a temporary public URL for local testing"
 echo "Press Ctrl+C to stop the tunnel"

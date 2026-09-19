@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live camera dashboard with ARGUS overlays and motion testing."""
+"""Live camera dashboard with HALO overlays and motion testing."""
 
 import sys
 from pathlib import Path
@@ -12,16 +12,16 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from argus import (
-    AdvancedArgusPipeline, AdvancedPipelineConfig,
-    ArgusPipeline, Detection
+from halo import (
+    AdvancedHaloPipeline, AdvancedPipelineConfig,
+    HaloPipeline, Detection
 )
-from argus.detectors import YOLODetector
-from argus.dashboard import DataStreamer
+from halo.detectors import YOLODetector
+from halo.dashboard import DataStreamer
 
 
 class LiveCameraDashboard:
-    """Live camera feed with ARGUS overlays and real-time dashboard streaming."""
+    """Live camera feed with HALO overlays and real-time dashboard streaming."""
 
     def __init__(self, camera_source: int = 0, port: int = 8080,
                  use_advanced: bool = True, enable_overlay: bool = True):
@@ -48,7 +48,7 @@ class LiveCameraDashboard:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
         
-        # Initialize ARGUS pipeline
+        # Initialize HALO pipeline
         if use_advanced:
             config = AdvancedPipelineConfig(
                 enable_imu_compensation=True,
@@ -56,9 +56,9 @@ class LiveCameraDashboard:
                 enable_ekf=True,
                 enable_cpa_collision=True
             )
-            self.pipeline = AdvancedArgusPipeline(config)
+            self.pipeline = AdvancedHaloPipeline(config)
         else:
-            self.pipeline = ArgusPipeline()
+            self.pipeline = HaloPipeline()
         
         # Initialize detector
         try:
@@ -107,7 +107,7 @@ class LiveCameraDashboard:
         }
 
     def process_frame(self, frame: np.ndarray, timestamp: float) -> dict:
-        """Process a frame through ARGUS pipeline.
+        """Process a frame through HALO pipeline.
         
         Args:
             frame: Input frame
@@ -211,7 +211,7 @@ class LiveCameraDashboard:
         return (gyro, accel, quaternion)
 
     def draw_overlays(self, frame: np.ndarray, results: dict) -> np.ndarray:
-        """Draw ARGUS overlays on frame.
+        """Draw HALO overlays on frame.
         
         Args:
             frame: Input frame
@@ -470,7 +470,7 @@ class LiveCameraDashboard:
                     self.fps = self.frame_count / elapsed
                 
                 # Display frame
-                cv2.imshow('ARGUS Live Dashboard', display_frame)
+                cv2.imshow('HALO Live Dashboard', display_frame)
                 
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
@@ -499,7 +499,7 @@ def main():
     """Main entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Live camera dashboard with ARGUS overlays")
+    parser = argparse.ArgumentParser(description="Live camera dashboard with HALO overlays")
     parser.add_argument("--camera", type=int, default=0, help="Camera source (default: 0)")
     parser.add_argument("--port", type=int, default=8080, help="Dashboard port (default: 8080)")
     parser.add_argument("--no-advanced", action="store_true", help="Use basic pipeline instead of advanced")

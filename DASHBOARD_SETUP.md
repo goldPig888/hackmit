@@ -1,4 +1,4 @@
-# ARGUS Remote Monitoring System
+# HALO Remote Monitoring System
 
 Complete remote monitoring solution with Cloudflare tunnel, live web dashboard, and video overlay capabilities.
 
@@ -7,30 +7,30 @@ Complete remote monitoring solution with Cloudflare tunnel, live web dashboard, 
 ### Default: Demo Dashboard
 ```bash
 cd /Users/mayespinola/Documents/hackmit
-bash scripts/start_argus.sh
+bash scripts/start_halo.sh
 ```
 This starts the dashboard with simulated data by default.
 
 ### Camera Mode with Video Overlay
 ```bash
-bash scripts/start_argus.sh --source 0 --overlay
+bash scripts/start_halo.sh --source 0 --overlay
 ```
 
 ### Full System with Remote Access
 ```bash
-bash scripts/start_argus.sh --source 0 --overlay --tunnel
+bash scripts/start_halo.sh --source 0 --overlay --tunnel
 ```
 
 ### Custom Configuration
 ```bash
-bash scripts/start_argus.sh --source /path/to/video.mp4 --port 9090 --overlay --tunnel
+bash scripts/start_halo.sh --source /path/to/video.mp4 --port 9090 --overlay --tunnel
 ```
 
 ## 🌐 Cloudflare Tunnel Setup
 
 ### Quick Tunnel (Default)
 ```bash
-bash scripts/start_argus.sh --tunnel
+bash scripts/start_halo.sh --tunnel
 ```
 This creates a temporary public URL for testing without configuration.
 
@@ -40,7 +40,7 @@ This creates a temporary public URL for testing without configuration.
 bash scripts/setup_cloudflare_tunnel.sh
 
 # Then use it
-bash scripts/start_argus.sh --permanent-tunnel
+bash scripts/start_halo.sh --permanent-tunnel
 ```
 
 The permanent tunnel requires:
@@ -97,10 +97,10 @@ python scripts/video_overlay.py --source video.mp4 --no-trajectories --no-hazard
 ### Access Dashboard on Phone
 ```bash
 # Start dashboard with tunnel for phone access
-bash scripts/start_argus.sh --tunnel
+bash scripts/start_halo.sh --tunnel
 
 # Or with camera and overlay
-bash scripts/start_argus.sh --source 0 --overlay --tunnel
+bash scripts/start_halo.sh --source 0 --overlay --tunnel
 ```
 Then open the provided Cloudflare URL on your phone. The dashboard is mobile-optimized with touch-friendly interface.
 
@@ -115,7 +115,7 @@ Then open the provided Cloudflare URL on your phone. The dashboard is mobile-opt
 
 ### Command-Line Arguments
 ```bash
-bash scripts/start_argus.sh --help
+bash scripts/start_halo.sh --help
 ```
 
 Available arguments:
@@ -152,7 +152,7 @@ Edit `.cloudflare/config.yml` to customize:
 ### Test Dashboard Locally
 ```bash
 # Start demo dashboard (default)
-bash scripts/start_argus.sh
+bash scripts/start_halo.sh
 
 # Test endpoints in another terminal
 curl http://localhost:8080/api/status
@@ -163,16 +163,16 @@ curl http://localhost:8080/api/hazards
 ### Test Video Overlay
 ```bash
 # Test with camera
-bash scripts/start_argus.sh --source 0 --overlay
+bash scripts/start_halo.sh --source 0 --overlay
 
 # Test with video file
-bash scripts/start_argus.sh --source /path/to/video.mp4 --overlay
+bash scripts/start_halo.sh --source /path/to/video.mp4 --overlay
 ```
 
 ### Test Cloudflare Tunnel
 ```bash
 # Start dashboard with tunnel
-bash scripts/start_argus.sh --tunnel
+bash scripts/start_halo.sh --tunnel
 
 # Access the provided URL from your phone
 # Should see the same dashboard as local access
@@ -181,7 +181,7 @@ bash scripts/start_argus.sh --tunnel
 ## 📊 Data Flow
 
 ```
-Camera/Video → Detection → ARGUS Pipeline → Risk Assessment
+Camera/Video → Detection → HALO Pipeline → Risk Assessment
                                              ↓
                                      Data Streamer
                                              ↓
@@ -196,14 +196,14 @@ Camera/Video → Detection → ARGUS Pipeline → Risk Assessment
 
 ### 1. Local Development
 ```bash
-bash scripts/start_argus.sh
+bash scripts/start_halo.sh
 ```
 - Run demo mode for testing
 - Access dashboard on localhost:8080
 
 ### 2. Remote Monitoring
 ```bash
-bash scripts/start_argus.sh --source 0 --overlay --tunnel
+bash scripts/start_halo.sh --source 0 --overlay --tunnel
 ```
 - Start camera dashboard with real detection
 - Enable Cloudflare tunnel for phone access
@@ -211,7 +211,7 @@ bash scripts/start_argus.sh --source 0 --overlay --tunnel
 
 ### 3. Field Testing
 ```bash
-bash scripts/start_argus.sh --source 0 --overlay
+bash scripts/start_halo.sh --source 0 --overlay
 ```
 - Use video overlay for real-time feedback
 - Record overlay frames for analysis
@@ -219,7 +219,7 @@ bash scripts/start_argus.sh --source 0 --overlay
 
 ### 4. Integration Testing
 ```bash
-bash scripts/start_argus.sh --source /path/to/test_video.mp4 --overlay
+bash scripts/start_halo.sh --source /path/to/test_video.mp4 --overlay
 ```
 - Test custom detectors with live data
 - Validate risk assessment algorithms
@@ -263,7 +263,7 @@ bash scripts/start_argus.sh --source /path/to/test_video.mp4 --overlay
 
 ## 🚀 Next Steps
 
-1. **Customize Dashboard**: Modify HTML/CSS in `src/argus/dashboard/server.py`
+1. **Customize Dashboard**: Modify HTML/CSS in `src/halo/dashboard/server.py`
 2. **Add Custom Detectors**: Integrate your weapons detection model
 3. **Configure Alerts**: Set up risk threshold notifications
 4. **Add Recording**: Implement video recording with overlays
@@ -298,7 +298,7 @@ ws.onmessage = (event) => {
 ## 🎨 Customization
 
 ### Dashboard Styling
-Edit the CSS in `src/argus/dashboard/server.py`:
+Edit the CSS in `src/halo/dashboard/server.py`:
 - Color schemes
 - Layout configurations
 - Mobile breakpoints
@@ -318,4 +318,4 @@ Edit `scripts/video_overlay.py`:
 - Color schemes
 - Information density
 
-This system provides a complete solution for remote ARGUS monitoring with real-time visualization, mobile access, and comprehensive testing capabilities.
+This system provides a complete solution for remote HALO monitoring with real-time visualization, mobile access, and comprehensive testing capabilities.

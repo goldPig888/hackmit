@@ -14,12 +14,12 @@ import threading
 from datetime import datetime
 from typing import Optional
 
-from argus import (
-    AdvancedArgusPipeline, AdvancedPipelineConfig,
-    ArgusPipeline, Detection
+from halo import (
+    AdvancedHaloPipeline, AdvancedPipelineConfig,
+    HaloPipeline, Detection
 )
-from argus.detectors import YOLODetector
-from argus.dashboard import DataStreamer, DashboardServer
+from halo.detectors import YOLODetector
+from halo.dashboard import DataStreamer, DashboardServer
 
 
 class LiveCameraWithDashboard:
@@ -50,7 +50,7 @@ class LiveCameraWithDashboard:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.cap.set(cv2.CAP_PROP_FPS, 30)
         
-        # Initialize ARGUS pipeline
+        # Initialize HALO pipeline
         if use_advanced:
             config = AdvancedPipelineConfig(
                 enable_imu_compensation=True,
@@ -58,9 +58,9 @@ class LiveCameraWithDashboard:
                 enable_ekf=True,
                 enable_cpa_collision=True
             )
-            self.pipeline = AdvancedArgusPipeline(config)
+            self.pipeline = AdvancedHaloPipeline(config)
         else:
-            self.pipeline = ArgusPipeline()
+            self.pipeline = HaloPipeline()
         
         # Initialize detector
         try:
@@ -114,7 +114,7 @@ class LiveCameraWithDashboard:
         }
 
     def process_frame(self, frame: np.ndarray, timestamp: float) -> dict:
-        """Process a frame through ARGUS pipeline.
+        """Process a frame through HALO pipeline.
         
         Args:
             frame: Input frame
@@ -198,7 +198,7 @@ class LiveCameraWithDashboard:
         return (gyro, accel, quaternion)
 
     def draw_overlays(self, frame: np.ndarray, results: dict) -> np.ndarray:
-        """Draw ARGUS overlays on frame."""
+        """Draw HALO overlays on frame."""
         overlay_frame = frame.copy()
         
         # Draw detection boxes
@@ -389,7 +389,7 @@ class LiveCameraWithDashboard:
                     self.fps = self.frame_count / elapsed
                 
                 # Display frame locally
-                cv2.imshow('ARGUS Live Camera', display_frame)
+                cv2.imshow('HALO Live Camera', display_frame)
                 
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF

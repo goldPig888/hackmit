@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ARGUS Dashboard with real-time monitoring and video overlay."""
+"""HALO Dashboard with real-time monitoring and video overlay."""
 
 import sys
 import asyncio
@@ -10,16 +10,16 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from argus import ArgusPipeline
-from argus.dashboard import DashboardServer, DataStreamer
-from argus.dashboard.data_streamer import DetectionEvent, HazardEvent, SystemStatus
-from argus.detectors import YOLODetector
-from argus.hazards import SyncHazardDetector
-from argus.models import Detection
+from halo import HaloPipeline
+from halo.dashboard import DashboardServer, DataStreamer
+from halo.dashboard.data_streamer import DetectionEvent, HazardEvent, SystemStatus
+from halo.detectors import YOLODetector
+from halo.hazards import SyncHazardDetector
+from halo.models import Detection
 
 
 class DashboardRunner:
-    """Run ARGUS with live dashboard."""
+    """Run HALO with live dashboard."""
 
     def __init__(self, source: str = "0", port: int = 8080):
         """Initialize dashboard runner.
@@ -32,7 +32,7 @@ class DashboardRunner:
         self.port = port
         self.data_streamer = DataStreamer()
         self.dashboard_server = DashboardServer(self.data_streamer, port=port)
-        self.pipeline = ArgusPipeline()
+        self.pipeline = HaloPipeline()
         self.sync_detector = SyncHazardDetector()
         self.total_detections = 0
         self.start_time = time.time()
@@ -134,7 +134,7 @@ class DashboardRunner:
 
                 # Display frame with overlays
                 frame = self._overlay_detections(frame, detections)
-                cv2.imshow("ARGUS Dashboard", frame)
+                cv2.imshow("HALO Dashboard", frame)
 
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
@@ -217,7 +217,7 @@ class DashboardRunner:
                 self.count = 0
             
             def detect(self, frame, timestamp_s):
-                from argus.models import Detection
+                from halo.models import Detection
                 self.count += 1
                 return [Detection(
                     object_id=f"mock-{self.count}",
@@ -238,7 +238,7 @@ class DashboardRunner:
     def _create_mock_track_state(self, assessment):
         """Create mock track state from assessment."""
         import numpy as np
-        from argus.models import TrackState
+        from halo.models import TrackState
         
         return TrackState(
             object_id=assessment.object_id,
@@ -288,7 +288,7 @@ class DashboardRunner:
 
 async def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="ARGUS Live Dashboard")
+    parser = argparse.ArgumentParser(description="HALO Live Dashboard")
     parser.add_argument("--source", default="demo", help="Video source (demo, camera index, or video file)")
     parser.add_argument("--port", type=int, default=8080, help="Dashboard server port")
     args = parser.parse_args()
