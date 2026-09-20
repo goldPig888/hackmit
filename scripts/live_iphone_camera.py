@@ -13,6 +13,7 @@ Dashboard (also shows annotated video at /video):
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 import threading
@@ -53,7 +54,11 @@ class IPhoneHaloProcessor:
         )
         self.pipeline = AdvancedHaloPipeline(config)
         self.world_builder = WorldStateBuilder()
-        self.detector = YOLODetector(model_path=model_path)
+        tracker_name = os.environ.get("HALO_TRACKER", "botsort_reid")
+        tracker_cfg = Path(__file__).resolve().parent.parent / "config" / f"{tracker_name}.yaml"
+        self.detector = YOLODetector(
+            model_path=model_path,
+            tracker_config=str(tracker_cfg) if tracker_cfg.exists() else "bytetrack.yaml")
         self.haptics = HapticPublisher(output_dir)
 
         self.hfov_deg = hfov_deg
@@ -72,6 +77,7 @@ class IPhoneHaloProcessor:
 
     def _clear_subjects(self) -> None:
         self.pipeline.reset()
+        self.detector.reset()
         self.world_builder.reset()
         self._intrinsics_set = False
         self._last_cleanup = 0.0
@@ -127,8 +133,18 @@ class IPhoneHaloProcessor:
             haptic_endpoint_set=self.haptics.endpoint is not None,
             frame_size=(frame.shape[1], frame.shape[0]),
             ts_s=ts_s,
+            brightness=float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()),
         )
         self.server.set_world_state(state)
+
+        # Reflex path: immediate-motion threats bypass risk gating entirely —
+        # strong directional haptic on every reflex frame.
+        threat = state.get("threat") or {}
+        if threat.get("att_state") == "REFLEX":
+            event = self.haptics.publish_reflex(
+                threat.get("direction", "center"), threat.get("id", "?"))
+            if event:
+                self.world_builder.notify_haptic(event.direction, event.intensity, ts_s)
 
         self.frame_count += 1
         elapsed = time.time() - self.start_time

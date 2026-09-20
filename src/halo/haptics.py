@@ -36,3 +36,23 @@ class HapticPublisher:
                 # Safety output remains observable locally when hardware drops out.
                 pass
         return event
+
+    def publish_reflex(self, direction: str, object_id: str) -> HapticEvent | None:
+        """Immediate-motion threat event: always strong, bypasses risk gating."""
+        if direction not in ("left", "right", "center"):
+            direction = "center"
+        event = HapticEvent(direction, 1.0, 0.0, 0.0, object_id, "strong", {"reflex": True})
+        payload = {"direction": event.direction, "risk": 1.0, "ttc_s": 0.0,
+                   "conflict_s": 0.0, "object_id": event.object_id,
+                   "intensity": "strong", "reflex": True}
+        with self.path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(payload) + "\n")
+        if self.endpoint:
+            try:
+                request = Request(self.endpoint, data=json.dumps(payload).encode(),
+                                  headers={"Content-Type": "application/json"}, method="POST")
+                with urlopen(request, timeout=0.25):
+                    pass
+            except OSError:
+                pass
+        return event

@@ -36,6 +36,20 @@ class YOLODetector(BaseDetector):
             "car", "truck", "bus", "motorcycle", "bicycle", "person"
         }
         self._supported_classes = set(self.model.names.values())
+        # Compact per-epoch display IDs: ByteTrack's internal counter keeps
+        # climbing forever, so map raw IDs onto 0..N and restart on reset().
+        self._id_map: dict[int, int] = {}
+
+    def reset(self) -> None:
+        """Restart tracking epoch — next detection becomes ID 0."""
+        self._id_map.clear()
+        try:
+            from ultralytics.trackers.basetrack import BaseTrack
+            BaseTrack.reset_id()
+            if getattr(self.model, "predictor", None) is not None:
+                self.model.predictor = None
+        except Exception:
+            pass
 
     def detect(self, frame, timestamp_s: float) -> list[Detection]:
         """Process frame with YOLO detection and tracking.
@@ -67,7 +81,8 @@ class YOLODetector(BaseDetector):
                     continue
                 
                 x, y, w, h = box
-                object_id = f"{label}-{track_id}"
+                compact_id = self._id_map.setdefault(track_id, len(self._id_map))
+                object_id = f"{label}-{compact_id}"
                 detections.append(Detection(
                     object_id=object_id,
                     label=label,

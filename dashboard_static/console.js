@@ -35,8 +35,33 @@ const clsColor = c => CLS_COLORS[c] || "#22d3ee";
 /* ================= MOCK ADAPTER (clearly isolated demo data) ================ */
 /* Used only with ?demo — generates a synthetic but schema-complete state so
    the full console is visible without the phone backend. */
+const SCENARIO = new URLSearchParams(location.search).get("demo") || "car";
+
 const Mock = {
     t0: performance.now() / 1000,
+    ambient(scene, n, t) {
+        // background pedestrians milling — the "perceived but unattended" layer
+        return Array.from({ length: n }, (_, i) => {
+            const a = (i / n) * Math.PI * 2 + Math.sin(t * 0.1 + i) * 0.1;
+            const d = 6 + (i % 4) * 2.5;
+            const x = Math.sin(a) * d, y = Math.cos(a) * d;
+            return {
+                id: `person-${20 + i}`, cls: "person", confidence: 0.8,
+                bbox: [100 + (i % 5) * 100, 400 + (i % 3) * 60, 42, 110],
+                position: [x, y], velocity: [Math.sin(i) * 0.3, Math.cos(i) * 0.3],
+                speed: 0.4, bearing: Math.atan2(x, y), bearing_rate: 0.005,
+                bearing_rel: Math.atan2(x, y), closing_rate: 0.0,
+                history: [], predicted_times: Array.from({ length: 21 }, (_, k) => k * 0.2),
+                predicted_path: Array.from({ length: 21 }, (_, k) => [x + Math.sin(i) * 0.3 * k * 0.2, y + Math.cos(i) * 0.3 * k * 0.2]),
+                pixel_history: [], pixel_predicted: [], pixel_history_stab: [],
+                sigma: 0.5, ttc: null, tcpa: null, dcpa: null, risk: 0.04,
+                risk_level: "safe", conflict_type: "safe_pass", will_collide: false,
+                conflict_point: null, direction: "center", direction_label: "AROUND",
+                factors: {}, expanding: false, raw_px_rate: 8,
+                attention: 0.12, att_state: "OBSERVE", reasons: [],
+            };
+        });
+    },
     state() {
         const t = performance.now() / 1000 - this.t0;
         const cyc = (t % 16) / 16;                       // 16s threat cycle
@@ -68,8 +93,11 @@ const Mock = {
             risk_level: risk > 0.7 ? "high" : risk > 0.4 ? "medium" : "low",
             conflict_type: colliding ? "collision" : "safe_pass",
             will_collide: colliding, conflict_point: colliding ? carPath[Math.min(8, carPath.length - 1)] : null,
-            direction: "left", direction_label: "REAR LEFT",
+            direction: "left", direction_label: "BEHIND LEFT",
             factors: {}, expanding: carD < 15, raw_px_rate: 40,
+            attention: clamp(risk + 0.2, 0, 1),
+            att_state: colliding ? "WARN" : (risk > 0.35 ? "ATTEND" : "OBSERVE"),
+            reasons: colliding ? ["approaching wearer", "predicted paths overlap"] : ["approaching wearer"],
         }, {
             id: "person-12", cls: "person", confidence: 0.88, bbox: [80, 320, 40, 110],
             position: [8, 12], velocity: [0, 0.4], speed: 0.4,
@@ -82,41 +110,128 @@ const Mock = {
             risk_level: "safe", conflict_type: "safe_pass", will_collide: false,
             conflict_point: null, direction: "right", direction_label: "FRONT RIGHT",
             factors: {}, expanding: false, raw_px_rate: 5,
+            attention: 0.15, att_state: "OBSERVE", reasons: [],
         }];
+
+        // -------- scenario lab: ?demo=car|crowded|sparse|lunge|comove --------
+        let density = "normal", environment = "outdoor";
+        if (SCENARIO === "crowded") {
+            density = "crowded"; environment = "indoor";
+            tracks.push(...this.ambient("crowded", 16, t));
+        } else if (SCENARIO === "sparse" || SCENARIO === "comove") {
+            density = "sparse"; environment = "indoor";
+            tracks.length = 0;
+            // one person co-moving behind the wearer: attention, not alarm
+            const bx = -2 + Math.sin(yaw) * 0.5, by = -7;   // behind-left, ~7m
+            tracks.push({
+                id: "person-4", cls: "person", confidence: 0.9, bbox: [180, 500, 55, 150],
+                position: [bx, by], velocity: [0, 0], speed: 1.4,
+                bearing: Math.atan2(bx, by), bearing_rate: 0.01,
+                bearing_rel: Math.atan2(bx, by), closing_rate: 0.0,
+                history: mkPath(bx * 1.3, by * 1.3, 0, 0),
+                predicted_times: Array.from({ length: 21 }, (_, i) => i * 0.2),
+                predicted_path: mkPath(bx, by, Math.sin(yaw) * 1.4, Math.cos(yaw) * 1.4),
+                pixel_history: [], pixel_predicted: [], pixel_history_stab: [],
+                sigma: 0.4, ttc: null, tcpa: null, dcpa: null, risk: 0.1,
+                risk_level: "low", conflict_type: "safe_pass", will_collide: false,
+                conflict_point: null, direction: "left", direction_label: "BEHIND LEFT",
+                factors: {}, expanding: false, raw_px_rate: 12,
+                attention: 0.62, att_state: "ATTEND",
+                reasons: ["persistent co-movement", "bearing stable", "tracking 12.0s"],
+            });
+        } else if (SCENARIO === "lunge") {
+            density = "sparse"; environment = "indoor";
+            // person lunges toward the wearer every 8s — reflex path demo
+            const ph = (t % 8) / 8;
+            const lunging = ph > 0.55 && ph < 0.85;
+            const pd = lunging ? lerp(7, 2.2, (ph - 0.55) / 0.3) : lerp(10, 7, ph / 0.55);
+            const px2 = Math.sin(0.5) * pd, py2 = Math.cos(0.5) * pd;
+            const pClose = lunging ? -6.5 : -0.4;
+            tracks.push({
+                id: "person-9", cls: "person", confidence: 0.91,
+                bbox: [260 - (10 - pd) * 14, 380, 60 + (10 - pd) * 10, 160 + (10 - pd) * 16],
+                position: [px2, py2], velocity: [pClose * Math.sin(0.5), pClose * Math.cos(0.5)],
+                speed: Math.abs(pClose), bearing: Math.atan2(px2, py2), bearing_rate: 0.01,
+                bearing_rel: Math.atan2(px2, py2), closing_rate: pClose,
+                history: mkPath(px2 * 1.4, py2 * 1.4, 0, 0),
+                predicted_times: Array.from({ length: 21 }, (_, i) => i * 0.2),
+                predicted_path: mkPath(px2, py2, pClose * Math.sin(0.5), pClose * Math.cos(0.5)),
+                pixel_history: [], pixel_predicted: [], pixel_history_stab: [],
+                sigma: 0.5, ttc: pd / Math.abs(pClose), tcpa: pd / Math.abs(pClose),
+                dcpa: 0.8, risk: lunging ? 0.85 : 0.15,
+                risk_level: lunging ? "high" : "low",
+                conflict_type: lunging ? "collision" : "safe_pass",
+                will_collide: lunging, conflict_point: lunging ? [0.3, 0.4] : null,
+                direction: "right", direction_label: "FRONT RIGHT",
+                factors: {}, expanding: lunging, raw_px_rate: lunging ? 260 : 15,
+                attention: lunging ? 1.0 : 0.2,
+                att_state: lunging ? "REFLEX" : "OBSERVE",
+                reasons: lunging
+                    ? ["rapid approach at close range", "closing 6.5 m/s", "image expanding fast", `est. contact ${(pd / 6.5).toFixed(1)}s`]
+                    : [],
+            });
+        }
+
+        const attCount = tracks.filter(x => x.att_state !== "OBSERVE").length;
+        const watchCount = tracks.filter(x => x.att_state === "WARN" || x.att_state === "REFLEX").length;
+        const threatCount = tracks.filter(x => x.att_state === "REFLEX" || x.will_collide).length;
+
+        const prim = tracks.find(x => x.att_state === "REFLEX")
+            || tracks.find(x => x.will_collide)
+            || tracks.reduce((a, b) => (b.attention > (a?.attention ?? -1) ? b : a), null);
+        const threatTrack = prim && prim.att_state !== "OBSERVE" ? prim : null;
 
         return {
             ready: true, timestamp: t,
-            system: { fps: 10, camera: true, imu: true, tracking: 2,
+            system: { fps: 10, camera: true, imu: true, tracking: tracks.length,
                       haptic_endpoint: false, world_model: "STABLE", frame_size: [1280, 720] },
             camera_pose: { yaw, pitch: 0.1, roll: 0, confidence: 0.9 },
+            scene: { density, environment,
+                     people: tracks.filter(x => x.cls === "person").length,
+                     reflex: tracks.some(x => x.att_state === "REFLEX") },
             rider_state: { position: [0, 0], velocity: [Math.sin(yaw) * 1.5, Math.cos(yaw) * 1.5],
                            speed: 1.5, heading: yaw, yaw_rate: 0.3 * Math.cos(t * 0.5),
                            turning: Math.abs(0.3 * Math.cos(t * 0.5)) > 0.12,
                            turn_direction: yaw > 0 ? "left" : "right",
                            predicted_path: egoPath, straight_path: straightPath },
             tracks,
-            primary_threat_id: "car-7",
-            threat: { id: "car-7", cls: "car", direction_label: "REAR LEFT", risk,
-                      ttc: carD / 6, tcpa: carD / 6.5, dcpa: colliding ? 1.2 : 6,
-                      closing_rate: -6 * (1 - carD / 30), confidence: 0.82,
+            primary_threat_id: threatTrack ? threatTrack.id : null,
+            threat: threatTrack ? { id: threatTrack.id, cls: threatTrack.cls,
+                      direction_label: threatTrack.direction_label,
+                      att_state: threatTrack.att_state, attention: threatTrack.attention,
+                      reasons: threatTrack.reasons,
+                      risk: threatTrack.risk,
+                      ttc: threatTrack.ttc, tcpa: threatTrack.tcpa,
+                      dcpa: threatTrack.dcpa,
+                      closing_rate: threatTrack.closing_rate, confidence: 0.82,
                       why: [
-                          { label: "closing rapidly", active: true },
+                          { label: "closing rapidly", active: threatTrack.closing_rate < -0.5 },
                           { label: "bearing stable", active: true },
                           { label: "rider turning", active: Math.abs(0.3 * Math.cos(t * 0.5)) > 0.12 },
-                          { label: "predicted paths overlap", active: colliding },
-                          { label: "expanding in frame", active: carD < 15 }]},
-            haptic: { left: risk > 0.5 ? risk : 0, right: 0, center: 0,
-                      direction: "left", intensity: "strong", ts: t },
-            counterfactual: { current_cpa: colliding ? 1.2 : 6, straight_cpa: 5.5,
-                              current_risk: risk, straight_risk: 0.2, delta: risk - 0.2 },
-            funnel: { perceived: 2, tracked: 2, moving: 2, closing: 1, conflict: colliding ? 1 : 0 },
+                          { label: "predicted paths overlap", active: threatTrack.will_collide },
+                          { label: "expanding in frame", active: threatTrack.expanding }]}
+                      : null,
+            haptic: { left: threatTrack && threatTrack.risk > 0.5 ? threatTrack.risk : 0,
+                      right: 0, center: 0,
+                      direction: threatTrack ? threatTrack.direction : null,
+                      intensity: threatTrack && threatTrack.att_state === "REFLEX" ? "strong" : "medium", ts: t },
+            counterfactual: { current_cpa: threatTrack ? threatTrack.dcpa : null,
+                              straight_cpa: 5.5,
+                              current_risk: threatTrack ? threatTrack.risk : 0,
+                              straight_risk: 0.2,
+                              delta: threatTrack ? threatTrack.risk - 0.2 : 0 },
+            funnel: { perceived: tracks.length, attended: attCount,
+                      watch: watchCount, threat: threatCount },
             events: [
-                { id: 1, ts: t - 6, type: "TRACK ACQUIRED", label: "car car-7" },
+                { id: 1, ts: t - 6, type: "TRACK ACQUIRED", label: threatTrack ? `${threatTrack.cls} ${threatTrack.id}` : "—" },
                 { id: 2, ts: t - 4, type: "CLOSING DETECTED", label: "-5.4 m/s" },
                 { id: 3, ts: t - 2, type: "RIDER TURN STARTED", label: "left" },
-                ...(colliding ? [{ id: 4, ts: t - 1, type: "PATH CONFLICT", label: "tCPA 1.2s", risk }] : []),
+                ...(threatTrack && threatTrack.att_state === "REFLEX"
+                    ? [{ id: 4, ts: t - 0.5, type: "REFLEX EVENT", label: "rapid approach", risk: 1 }]
+                    : threatTrack && threatTrack.will_collide
+                        ? [{ id: 4, ts: t - 1, type: "PATH CONFLICT", label: "tCPA 1.2s", risk: threatTrack.risk }] : []),
             ],
-            risk_history: Array.from({ length: 80 }, (_, i) => [t - 8 + i * 0.1, clamp(1 - (lerp(30, carD, i / 79)) / 12, 0, 1)]),
+            risk_history: Array.from({ length: 80 }, (_, i) => [t - 8 + i * 0.1, clamp(1 - (lerp(30, threatTrack ? Math.hypot(...threatTrack.position) : 30, i / 79)) / 12, 0, 1)]),
             horizon_s: 4,
         };
     }
@@ -206,9 +321,9 @@ function drawCamera(s, tracks) {
     const now = performance.now() / 1000;
 
     for (const t of tracks) {
-        const primary = t.id === s.primary_threat_id;
+        const primary = t.id === s.primary_threat_id || t.att_state === "REFLEX";
         const linked = t.id === S.linked;
-        const col = primary ? riskColor(t.risk) : (linked ? "rgba(34,211,238,1)" : "rgba(74,90,110,0.9)");
+        const col = primary ? riskColor(t.att_state === "REFLEX" ? 1 : t.risk) : (linked ? "rgba(34,211,238,1)" : "rgba(74,90,110,0.9)");
 
         // trails
         const trail = (S.stab ? t.pixel_history_stab : t.pixel_history) || [];
@@ -326,6 +441,9 @@ function drawWorld(s, tracks) {
     }
 
     const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 180);
+    // Spotlight: while anyone is attended (headed for the wearer or otherwise
+    // relevant), fade the background so attention lands on them.
+    const spotlight = tracks.some(t => t.att_state && t.att_state !== "OBSERVE");
 
     // risk fields: translucent occupancy regions along predicted paths
     for (const t of tracks) {
@@ -336,7 +454,7 @@ function drawWorld(s, tracks) {
             const rad = (0.6 + (t.sigma || 0.5) * 0.5 + tt * 0.35) * scale;
             const [sx, sy] = w2s(p);
             const g = wctx.createRadialGradient(sx, sy, 0, sx, sy, rad);
-            const base = t.id === s.primary_threat_id ? riskColor(t.risk, 0.10 + 0.05 * pulse) : "rgba(120,140,160,0.05)";
+            const base = t.id === s.primary_threat_id ? riskColor(t.risk, 0.10 + 0.05 * pulse) : `rgba(120,140,160,${spotlight ? 0.02 : 0.05})`;
             g.addColorStop(0, base); g.addColorStop(1, "rgba(0,0,0,0)");
             wctx.fillStyle = g;
             wctx.beginPath(); wctx.arc(sx, sy, rad, 0, Math.PI * 2); wctx.fill();
@@ -345,9 +463,11 @@ function drawWorld(s, tracks) {
 
     // history trails + predicted ribbons + center lines
     for (const t of tracks) {
-        const primary = t.id === s.primary_threat_id;
-        const base = primary ? riskColor(t.risk) : clsColor(t.cls);
-        const alpha = primary ? 1 : 0.55;
+        const primary = t.id === s.primary_threat_id || t.att_state === "REFLEX";
+        const base = primary ? riskColor(t.att_state === "REFLEX" ? Math.max(t.risk, 0.9) : t.risk) : clsColor(t.cls);
+        const alpha = primary ? 1 : spotlight
+            ? (t.att_state === "ATTEND" ? 0.28 : 0.1)
+            : (t.att_state === "ATTEND" ? 0.7 : 0.4);
 
         if (t.history && t.history.length > 1) {
             for (let i = 1; i < t.history.length; i++) {
@@ -439,11 +559,11 @@ function drawWorld(s, tracks) {
 
     // objects
     for (const t of tracks) {
-        const primary = t.id === s.primary_threat_id;
+        const primary = t.id === s.primary_threat_id || t.att_state === "REFLEX";
         const linked = t.id === S.linked;
         const [sx, sy] = w2s(t.position);
         const rad = primary ? 8 : 5;
-        wctx.fillStyle = primary ? riskColor(t.risk) : hexA(clsColor(t.cls), 0.85);
+        wctx.fillStyle = primary ? riskColor(t.att_state === "REFLEX" ? 1 : t.risk) : hexA(clsColor(t.cls), spotlight ? (t.att_state === "ATTEND" ? 0.35 : 0.15) : (t.att_state === "ATTEND" ? 0.85 : 0.6));
         wctx.beginPath(); wctx.arc(sx, sy, rad, 0, Math.PI * 2); wctx.fill();
         if (primary || linked) {
             wctx.strokeStyle = primary ? riskColor(t.risk, 0.5 * pulse + 0.3) : "rgba(34,211,238,0.8)";
@@ -553,18 +673,32 @@ function updateDom(s, tracks) {
     wm.querySelector("b").textContent = `WORLD MODEL: ${sys.world_model}`;
     wm.className = `pill wm ${sys.world_model === "STABLE" ? "stable" : "degraded"}`;
 
-    // funnel
+    // funnel: perception -> attention -> watch -> threat
     const f = s.funnel || {};
-    $("funnel").innerHTML = ["perceived", "tracked", "moving", "closing", "conflict"]
+    const funnelKeys = f.attended !== undefined
+        ? ["perceived", "attended", "watch", "threat"]
+        : ["perceived", "tracked", "moving", "closing", "conflict"];
+    $("funnel").innerHTML = funnelKeys
         .map((k, i, arr) =>
-            `<div class="f-step ${k === "conflict" && f[k] > 0 ? "hot" : ""}"><b>${f[k] ?? 0}</b> ${k.toUpperCase()}</div>` +
+            `<div class="f-step ${k === "threat" || k === "conflict" ? (f[k] > 0 ? "hot" : "") : ""}"><b>${f[k] ?? 0}</b> ${k.toUpperCase()}</div>` +
             (i < arr.length - 1 ? `<div class="f-arrow">→</div>` : "")).join("");
+
+    // scene + reflex mode
+    const scene = s.scene || {};
+    const sceneLabel = scene.environment
+        ? `${scene.environment.toUpperCase()} · ${(scene.density || "--").toUpperCase()}`
+        : (scene.density || "--").toUpperCase();
+    $("stScene").querySelector("b").textContent =
+        sceneLabel + (scene.people != null ? ` · ${scene.people}p` : "");
+    document.body.classList.toggle("reflex", Boolean(scene.reflex));
+    reflexAlert(Boolean(scene.reflex));
 
     // threat rail
     const th = s.threat;
     if (th) {
         $("thId").textContent = `${(th.cls || "").toUpperCase()} ${th.id}`;
-        $("thDir").textContent = th.direction_label || "—";
+        $("thDir").textContent =
+            `${th.att_state || "—"} · ${th.direction_label || "—"}`;
         const pct = Math.round((th.risk || 0) * 100);
         $("thRisk").textContent = pct;
         const rb = document.querySelector(".risk-big");
@@ -576,8 +710,13 @@ function updateDom(s, tracks) {
         $("thDcpa").textContent = th.dcpa != null ? th.dcpa.toFixed(1) + " m" : "—";
         $("thClose").textContent = th.closing_rate != null ? th.closing_rate.toFixed(1) + " m/s" : "—";
         $("thConf").textContent = th.confidence != null ? (th.confidence * 100).toFixed(0) + "%" : "—";
-        $("whyList").innerHTML = (th.why || []).map(w =>
-            `<li class="${w.active ? "on" : ""}">${w.label}</li>`).join("");
+        const whyHtml = (th.why || []).map(w =>
+            `<li class="${w.active ? "on" : ""}">${w.label}</li>`);
+        for (const reason of th.reasons || []) {
+            if (!whyHtml.some(h => h.includes(reason)))
+                whyHtml.push(`<li class="on">${reason}</li>`);
+        }
+        $("whyList").innerHTML = whyHtml.join("");
     } else {
         $("thId").textContent = "—"; $("thDir").textContent = "NO ACTIVE THREAT";
         $("thRisk").textContent = "0"; $("thRiskBar").style.width = "0%";
@@ -594,16 +733,23 @@ function updateDom(s, tracks) {
     const showAlert = Boolean(th && alertTrack);
     alert.hidden = !showAlert;
     if (showAlert) {
+        const reflex = th.att_state === "REFLEX" || (scene.reflex && alertTrack.att_state === "REFLEX");
         const high = th.risk >= 0.70;
-        const conflict = th.risk >= 0.30;
-        alert.classList.toggle("high", high);
+        const conflict = th.risk >= 0.30 || reflex;
+        alert.classList.toggle("reflex", reflex);
+        alert.classList.toggle("high", high && !reflex);
         alert.classList.toggle("track", !conflict);
-        $("cameraAlertTitle").textContent = `${(th.direction_label || "TRACKING").toUpperCase()} · ${Math.round(th.risk * 100)}%`;
-        const cpa = th.tcpa != null && isFinite(th.tcpa)
-            ? `${th.tcpa.toFixed(1)}s TO CPA`
-            : (conflict ? "TRACKING CONFLICT" : "PREDICTED PATH ACTIVE");
+        $("cameraAlertTitle").textContent = reflex
+            ? `IMMEDIATE THREAT · ${(th.direction_label || "").toUpperCase()}`
+            : `${(th.direction_label || "TRACKING").toUpperCase()} · ${Math.round(th.risk * 100)}%`;
+        const cpa = reflex
+            ? "RAPID APPROACH DETECTED"
+            : (th.tcpa != null && isFinite(th.tcpa)
+                ? `${th.tcpa.toFixed(1)}s TO CPA`
+                : (conflict ? "TRACKING CONFLICT" : "PREDICTED PATH ACTIVE"));
         const label = (alertTrack && alertTrack.cls ? alertTrack.cls.toUpperCase() : th.cls || "OBJECT").toUpperCase();
-        alert.querySelector(".camera-alert-kicker").textContent = conflict ? "PREDICTED CONFLICT" : "TRACKING";
+        alert.querySelector(".camera-alert-kicker").textContent =
+            reflex ? "HALO REFLEX" : (conflict ? "PREDICTED CONFLICT" : "TRACKING");
         $("cameraAlertMeta").textContent = `${label} · ${cpa}`;
     }
 
@@ -646,6 +792,28 @@ function setPill(id, ok, okText, badText) {
     const el = $(id);
     el.querySelector("b").textContent = ok ? okText : badText;
     el.className = "pill " + (ok ? "ok" : "bad");
+}
+
+/* ---------------- reflex audio alert ---------------- */
+let _audioCtx = null, _wasReflex = false;
+document.addEventListener("click", () => { _audioCtx && _audioCtx.resume(); });
+
+function reflexAlert(on) {
+    if (on && !_wasReflex) {
+        try {
+            _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+            if (_audioCtx.state === "suspended") _audioCtx.resume();
+            const osc = _audioCtx.createOscillator(), g = _audioCtx.createGain();
+            osc.type = "sawtooth";
+            osc.frequency.setValueAtTime(660, _audioCtx.currentTime);
+            osc.frequency.setValueAtTime(880, _audioCtx.currentTime + 0.12);
+            g.gain.setValueAtTime(0.18, _audioCtx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + 0.55);
+            osc.connect(g); g.connect(_audioCtx.destination);
+            osc.start(); osc.stop(_audioCtx.currentTime + 0.55);
+        } catch (e) { /* audio unavailable — visual alert still fires */ }
+    }
+    _wasReflex = on;
 }
 
 /* ---------------- interactions ---------------- */

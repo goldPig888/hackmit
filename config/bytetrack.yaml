@@ -1,0 +1,11 @@
+# HALO ByteTrack tuning — biased toward ID persistence over reacquisition speed.
+# At ~10-14 fps phone streams, the default 30-frame buffer drops tracks during
+# brief occlusions/misses and assigns a fresh ID, which looks like a new person.
+
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.45   # harder to spawn a new ID; prefer re-associating to lost tracks
+track_buffer: 90         # ~6-9s at stream fps — survive occlusion + phone hiccups
+match_thresh: 0.5        # looser IoU association; fast close-range motion breaks IoU overlap
+fuse_score: True
