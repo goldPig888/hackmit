@@ -20,7 +20,9 @@ context-aware attention + reflex → video / console / haptics
 |---|---|---|
 | Predictive personal-safety layer | Forecasts interactions instead of only labeling nearby objects. | Active |
 | iPhone sensing and transport | Safari streams JPEG frames plus orientation, gyro, and acceleration over `/ingest`. | Active |
-| YOLO11n + persistent subjects | Detects road users and people; iPhone mode prefers BoT-SORT + selective ReID, with ByteTrack fallback. | Active |
+| YOLO11n + persistent subjects | Detects road users and people; iPhone mode prefers BoT-SORT + selective ReID (embeddings only for near or suspicious-motion subjects), with ByteTrack fallback. | Active |
+| Episodic follower memory | Accumulates co-movement and reappearance episodes per ReID identity; alerts the wearer to persistent followers with a calm one-sentence narration (Meta Model API / muse-spark, deterministic fallback). | Active |
+| Street-scale simulation | `/example` runs agents on real OpenStreetMap geometry (MIT area roads, crossings, speed limits) with the same CPA/attention logic and a live observed-danger ranking per crossing. | Active |
 | IMU ego-motion compensation | Stabilizes camera rays so turning the phone is not mistaken for subject motion. | Active |
 | Stabilized 3D world model | Tracks approximate `[X, Y, Z, Vx, Vy, Vz]` object state with an EKF. | Active |
 | Future path prediction | Predicts straight constant-velocity object paths and a curved rider arc for four seconds. | Active |
@@ -68,8 +70,9 @@ On the Mac, open:
 
 - Console: `http://localhost:8080/demo`
 - Processed video: `http://localhost:8080/video`
-- Phone streaming page: `http://localhost:8080/phone`
+- Phone streaming page: `http://localhost:8080/phone` (with on-device spoken/vibration alerts)
 - Training Lab: `http://localhost:8080/training`
+- Street example (OSM map sim): `http://localhost:8080/example`
 
 iOS requires HTTPS for camera and motion permission. A Cloudflare quick-tunnel launcher is included:
 
@@ -99,15 +102,11 @@ Keep the phone preview upright as mounted. The receiver corrects phone-to-camera
 
 The iPhone sends JPEG frames plus motion messages. Browser orientation creates a device-to-earth rotation, then HALO applies the orientation-specific device-to-camera rotation:
 
-\[
-R_{earth\leftarrow camera}=R_{earth\leftarrow device}R_{device\leftarrow camera}
-\]
+$$R_{earth\leftarrow camera} = R_{earth\leftarrow device}\; R_{device\leftarrow camera}$$
 
-For camera pixel \(p=[u,v,1]^T\), HALO computes a camera ray and stabilizes it in the world frame:
+For camera pixel $p = [u, v, 1]^T$, HALO computes a camera ray and stabilizes it in the world frame:
 
-\[
-r_c=K^{-1}p,qquad r_w=R_{earth\leftarrow camera}r_c
-\]
+$$r_c = K^{-1} p, \qquad r_w = R_{earth\leftarrow camera}\; r_c$$
 
 The newest frame is always used and older buffered frames are dropped, preventing latency from accumulating.
 
@@ -115,15 +114,11 @@ The newest frame is always used and older buffered frames are dropped, preventin
 
 Monocular depth is estimated from semantic object height and bounding-box height:
 
-\[
-d\approx\frac{H_{typical}f_y}{h_{bbox}}
-\]
+$$d \approx \frac{H_{typical}\, f_y}{h_{bbox}}$$
 
 HALO estimates a state of position and velocity:
 
-\[
-[X,Y,Z,V_x,V_y,V_z]^T
-\]
+$$[X, Y, Z, V_x, V_y, V_z]^T$$
 
 An EKF combines noisy bearing/elevation/depth observations with temporal prediction. Coordinates are rider-relative: +Y forward, +X right, +Z up.
 
@@ -131,16 +126,12 @@ An EKF combines noisy bearing/elevation/depth observations with temporal predict
 
 Objects use constant-velocity prediction:
 
-\[
-p_o(t+\tau)=p_o(t)+v_o(t)\tau
-\]
+$$p_o(t + \tau) = p_o(t) + v_o(t)\, \tau$$
 
 The rider uses a bicycle-model arc when turning. HALO samples both trajectories for four seconds and finds:
 
-\[
-t_{CPA}=\arg\min_\tau\|p_o(\tau)-p_r(\tau)\|,qquad
-d_{CPA}=\min_\tau\|p_o(\tau)-p_r(\tau)\|
-\]
+$$t_{CPA} = \arg\min_\tau \|p_o(\tau) - p_r(\tau)\|, \qquad
+d_{CPA} = \min_\tau \|p_o(\tau) - p_r(\tau)\|$$
 
 That prevents a false warning when something is nearby but will safely pass outside the rider’s path.
 
