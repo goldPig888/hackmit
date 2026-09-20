@@ -1,12 +1,32 @@
-# HALO — Predictive Micromobility Safety Prototype
+# HALO
 
-HALO turns rear-camera detections and phone motion into interpretable collision-risk events:
+**HALO is a live predictive safety and attention prototype.** It turns an iPhone camera and motion stream into stabilized tracks, approximate rider-relative world state, future paths, collision reasoning, attention evidence, directional haptics, and a live visual console.
 
-`detection → temporal state → TTC gate → future paths → conflict → directional haptic event`
+```text
+iPhone camera + IMU
+        ↓
+pose correction → YOLO11n + tracking → world-frame EKF
+        ↓
+object and rider path prediction → closest point of approach
+        ↓
+context-aware attention + reflex → video / console / haptics
+```
 
-This is a hackathon prototype, **not a certified safety system**. Its risk thresholds must not be used to control a vehicle or replace rider awareness.
+> HALO is a hackathon research prototype, not a certified safety system, violence detector, or security product. Its distances, risk values, thresholds, and motion labels are estimates that require calibration and evaluation before real-world safety use.
 
-## Run it in order
+## Features
+
+- iPhone Safari camera + Device Motion/Orientation streaming over one WebSocket.
+- Phone-pose compensation that separates rider/camera turns from object motion.
+- YOLO11n detection of people and road users; BoT-SORT + selective ReID in iPhone mode, with ByteTrack fallback.
+- Semantic monocular depth, world-frame tracking, and a per-object extended Kalman filter.
+- Four-second object and curved rider-path prediction with closest-point-of-approach (CPA) conflict scoring.
+- Context-aware `OBSERVE → ATTEND → WARN → REFLEX` attention policy.
+- Explainable per-track evidence: approach, heading, expansion, co-movement, trajectory conflict, and strike-like motion.
+- A compute-bounded pose path: only up to two close-range people receive pose inference for wrist-speed and elbow-extension evidence.
+- Directional local/ESP32 haptics, annotated video, a predicted-world dashboard, fullscreen views, replay, zoom, clear-subjects control, and a Training Lab.
+
+## Quick start
 
 ```bash
 ./scripts/00_check_env.sh
@@ -15,51 +35,158 @@ This is a hackathon prototype, **not a certified safety system**. Its risk thres
 ./scripts/04_run_demo.sh
 ```
 
-The demo needs no camera, YOLO model, or hardware. It simulates an approaching, crossing car and writes newline-delimited haptic events to `runs/demo/haptics.jsonl`.
+The synthetic demo requires no phone, model, or hardware. It writes haptic events to `runs/demo/haptics.jsonl`.
 
-For a real video/camera, first install the optional vision dependencies and cache the model:
+```bash
+./scripts/06_run_tests.sh
+```
+
+## iPhone live mode
+
+Install optional vision dependencies and cache model weights:
 
 ```bash
 ./scripts/03_download_models.sh
-./scripts/05_run_camera.sh path/to/rear-camera.mp4
-# or
-./scripts/05_run_camera.sh 0
 ```
 
-## iPhone live stream (real IMU)
-
-The advanced pipeline's camera-rotation compensation needs real IMU data. An iPhone provides it via Safari — no app install:
+Start the live pipeline:
 
 ```bash
-.venv/bin/python scripts/live_iphone_camera.py          # starts server on :8080
-./scripts/start_halo.sh --iphone --tunnel              # or via the launcher + HTTPS tunnel
+.venv/bin/python scripts/live_iphone_camera.py
 ```
 
-Then open `https://<tunnel-host>/phone` on the iPhone (iOS requires HTTPS for camera + motion access) and tap **Start HALO**. The page streams JPEG frames + gyro/accel/orientation over `/ingest`; the Mac runs detection and feeds the real pose into `AdvancedHaloPipeline`. Watch annotated output at `http://localhost:8080/video`.
+On the Mac, open:
 
-Calibration notes: keep the preview on the phone page upright as held (use the rotate buttons if it looks sideways — the camera extrinsic assumes display-upright pixels). `--hfov` tunes the assumed lens FOV (default 75°).
+- Console: `http://localhost:8080/demo`
+- Processed video: `http://localhost:8080/video`
+- Phone streaming page: `http://localhost:8080/phone`
+- Training Lab: `http://localhost:8080/training`
 
-To forward output to an ESP32 HTTP endpoint:
+iOS requires HTTPS for camera and motion permission. A Cloudflare quick-tunnel launcher is included:
 
 ```bash
-HALO_HAPTIC_URL=http://192.168.4.1/haptic ./scripts/05_run_camera.sh 0
+./scripts/start_halo.sh --iphone --tunnel --vision
 ```
 
-## Repository layout
+If port 8080 is occupied:
 
-- `scripts/` — executable, numbered Bash entry points.
-- `src/halo/` — reusable library; it has no coupling to a camera or ESP32.
-- `tests/` — deterministic checks of TTC, conflict, and directional risk behavior.
-- `runs/` — generated recordings, ignored by Git.
+```bash
+.venv/bin/python scripts/live_iphone_camera.py --port 8081
+```
 
-## Input coordinate convention
+Keep the phone preview upright as mounted. The receiver corrects phone-to-camera rotation using the screen orientation; use the phone-page rotate control if the preview is sideways. `--hfov` configures assumed horizontal field of view (default: 75°).
 
-The core world model uses meters: rider is at `(0, 0)`, forward is positive `y`, and right is positive `x`. Camera detections are in pixels and are mapped into this local frame by `ImageGroundProjector`. That mapping is deliberately conservative: calibrate it before interpreting values as physical measurements.
+## Dashboard controls
 
-## Haptic event contract
+- `⤢`: expand a camera or predicted-world view; `Esc` closes it.
+- Mouse wheel on the world view: zoom; double-click: return to auto-range.
+- `STAB`: switch raw/stabilized motion trails.
+- `CLEAR SUBJECTS`: reset tracker IDs, EKF, pose history, dashboard history, and haptic state; the next frame starts a new tracking epoch.
+- One primary report is shown at a time. `REFLEX` outranks `WARN`, `ATTEND`, and `OBSERVE`; a secondary elevated subject may also be shown.
+
+## How it works
+
+### Sensing and pose
+
+The iPhone sends JPEG frames plus motion messages. Browser orientation creates a device-to-earth rotation, then HALO applies the orientation-specific device-to-camera rotation:
+
+\[
+R_{earth\leftarrow camera}=R_{earth\leftarrow device}R_{device\leftarrow camera}
+\]
+
+For camera pixel \(p=[u,v,1]^T\), HALO computes a camera ray and stabilizes it in the world frame:
+
+\[
+r_c=K^{-1}p,qquad r_w=R_{earth\leftarrow camera}r_c
+\]
+
+The newest frame is always used and older buffered frames are dropped, preventing latency from accumulating.
+
+### World state
+
+Monocular depth is estimated from semantic object height and bounding-box height:
+
+\[
+d\approx\frac{H_{typical}f_y}{h_{bbox}}
+\]
+
+HALO estimates a state of position and velocity:
+
+\[
+[X,Y,Z,V_x,V_y,V_z]^T
+\]
+
+An EKF combines noisy bearing/elevation/depth observations with temporal prediction. Coordinates are rider-relative: +Y forward, +X right, +Z up.
+
+### Prediction and conflict
+
+Objects use constant-velocity prediction:
+
+\[
+p_o(t+\tau)=p_o(t)+v_o(t)\tau
+\]
+
+The rider uses a bicycle-model arc when turning. HALO samples both trajectories for four seconds and finds:
+
+\[
+t_{CPA}=\arg\min_\tau\|p_o(\tau)-p_r(\tau)\|,qquad
+d_{CPA}=\min_\tau\|p_o(\tau)-p_r(\tau)\|
+\]
+
+That prevents a false warning when something is nearby but will safely pass outside the rider’s path.
+
+### Attention and reflex
+
+Collision probability is not the only signal. HALO aggregates explainable evidence:
+
+```text
+proximity · rapid approach · heading toward wearer · unusual image motion
+rapid expansion · persistence · co-movement · strike-like limb motion
+trajectory conflict
+```
+
+Weights change across six profiles: sparse/normal/crowded × indoor/outdoor. Crowded scenes reduce the importance of proximity; sparse outdoor scenes increase persistence and co-movement influence.
+
+`REFLEX` is separate from ordinary collision-risk gating. It can trigger for rapid close-range motion, strong image expansion, or close-range pose evidence. It labels an **observable motion pattern**, never a person’s intent.
+
+## Outputs
+
+- **Haptics:** JSONL events plus an optional ESP32 HTTP POST.
+- **Video:** annotated latest JPEG at `/frame.jpg` and MJPEG at `/video`.
+- **Console:** unified `/api/world` snapshot rendered at `/demo`.
+- **Training Lab:** simulation and attention-policy experimentation at `/training`; deterministic reflex always remains outside the learned policy.
+
+To POST haptics to an ESP32:
+
+```bash
+HALO_HAPTIC_URL=http://192.168.4.1/haptic \
+  .venv/bin/python scripts/live_iphone_camera.py
+```
+
+Example payload:
 
 ```json
-{"direction":"left","risk":0.82,"ttc_s":1.9,"conflict_s":1.6,"object_id":"car-12"}
+{
+  "direction": "left",
+  "risk": 0.82,
+  "ttc_s": 1.9,
+  "conflict_s": 1.6,
+  "object_id": "car-12",
+  "intensity": "strong"
+}
 ```
 
-`direction` is the side where the threat lies (`left`, `right`, or `center`). The HTTP transport uses a POST of this JSON; without `HALO_HAPTIC_URL`, events are safely recorded locally.
+## Project layout
+
+- `scripts/` — setup, demo, live launch, testing, and utility scripts.
+- `dashboard_static/` — console, phone streaming page, and Training Lab UI.
+- `src/halo/` — perception, IMU, tracking, EKF, collision, attention, pose, haptic, dashboard, and training modules.
+- `config/` — ByteTrack and BoT-SORT-ReID configurations.
+- `tests/` — deterministic core checks.
+- `runs/` — generated recordings and output, ignored by Git.
+
+## Research lineage and limits
+
+HALO takes its baseline from Lim et al.’s smartphone-based motorcycle collision-warning work: monocular TTC, temporal filtering, trajectory prediction, and IMU-derived rider direction. HALO extends this with modern tracking, full phone-pose stabilization, approximate world-frame EKF state, curved rider paths, CPA path conflict, context-conditioned attention, pose evidence, explainability, and directional haptics. [Lim et al., 2021](https://www.sciopen.com/article/10.1108/JICV-11-2020-0014) · [Lim’s SUTD thesis](https://repository.sutd.edu.sg/esploro/outputs/graduate/Advanced-forward-collision-warning-system-for/9910477209846)
+
+Before any safety claim, record and label scenarios, calibrate camera geometry, evaluate false alerts and misses across contexts, and test the haptic policy with users. HALO must not be used to determine a person’s identity, intent, or dangerousness.

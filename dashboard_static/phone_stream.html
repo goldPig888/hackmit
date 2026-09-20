@@ -43,6 +43,7 @@
 <div class="status" id="camStatus">Camera: <b>off</b></div>
 <div class="status" id="imuStatus">IMU: <b>off</b></div>
 <div class="status" id="statStatus">Frames sent: <b>0</b> | IMU sent: <b>0</b></div>
+<div class="status" id="alertStatus">Alerts: <b>armed on start</b> <button id="alertBtn" style="background:#121826;color:#e0e6ed;border:1px solid #1a2332;border-radius:6px;padding:2px 10px;font-size:1em">mute</button></div>
 
 <video id="vid" playsinline muted autoplay></video>
 <canvas id="out"></canvas>
@@ -152,7 +153,92 @@ async function start() {
 
     setInterval(sendFrame, FRAME_INTERVAL_MS);
     setInterval(updateStats, 500);
+
+    // ---------- on-device alerts: voice + vibration ----------
+    // Start tap is a user gesture, so TTS/vibrate are permitted from here.
+    if ("speechSynthesis" in window) {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance("HALO armed");
+        u.rate = 1.1; speechSynthesis.speak(u);
+    }
+    setInterval(pollWorld, 800);
 }
+
+let alertsOn = true;
+const spoken = { follower: {}, threatId: null, reflexAt: 0 };
+const VIBE = { left: [90, 50, 90], right: [160], front: [60, 60, 60],
+               behind: [50, 40, 50, 40, 50], reflex: [120, 60, 120, 60, 200] };
+
+function say(text) {
+    if (!alertsOn || !("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.1; u.volume = 1.0;
+    speechSynthesis.speak(u);
+}
+function buzz(dir) {
+    if (!alertsOn || !navigator.vibrate) return;
+    navigator.vibrate(VIBE[dir] || VIBE.behind);
+}
+function dirKey(label) {
+    const l = (label || "").toLowerCase();
+    if (l.includes("left")) return "left";
+    if (l.includes("right")) return "right";
+    if (l.includes("front") || l.includes("ahead")) return "front";
+    return "behind";
+}
+
+async function pollWorld() {
+    let s;
+    try {
+        const r = await fetch("/api/world", { cache: "no-store" });
+        s = await r.json();
+    } catch (e) { return; }
+    if (!s || !s.ready) return;
+    const now = performance.now();
+    const th = s.threat || {};
+    const tracks = s.tracks || [];
+
+    // REFLEX — strongest channel: speech + long pattern
+    if (tracks.some(t => t.att_state === "REFLEX") && now - spoken.reflexAt > 3000) {
+        spoken.reflexAt = now;
+        buzz("reflex");
+        say("Reflex" + (th.direction_label ? ", " + th.direction_label.toLowerCase() : ""));
+        setAlert("REFLEX " + (th.direction_label || ""));
+        return;
+    }
+    // WARN — directional buzz only; voice is reserved for REFLEX + follower
+    if (th.att_state === "WARN" && th.id !== spoken.threatId) {
+        spoken.threatId = th.id;
+        buzz(dirKey(th.direction_label));
+        setAlert("WARN " + (th.direction_label || ""));
+    }
+    // follower memory — buzz on detection, speak only the narration
+    for (const fol of ((s.memory && s.memory.followers) || [])) {
+        const seen = spoken.follower[fol.id];
+        if (!seen) {
+            spoken.follower[fol.id] = { narrated: false };
+            buzz("behind");
+        } else if (!seen.narrated && fol.narration) {
+            seen.narrated = true;
+            say(fol.narration);
+        }
+    }
+}
+function setAlert(t) {
+    document.getElementById("alertStatus").innerHTML =
+        'Alerts: <b style="color:#ff6666">' + t + "</b>" +
+        ' <button id="alertBtn" style="background:#121826;color:#e0e6ed;border:1px solid #1a2332;border-radius:6px;padding:2px 10px;font-size:1em">' +
+        (alertsOn ? "mute" : "unmute") + "</button>";
+    bindAlertBtn();
+}
+function bindAlertBtn() {
+    document.getElementById("alertBtn").onclick = () => {
+        alertsOn = !alertsOn;
+        if (!alertsOn && "speechSynthesis" in window) speechSynthesis.cancel();
+        setAlert(alertsOn ? "armed" : "muted");
+    };
+}
+bindAlertBtn();
 
 function sendFrame() {
     if (!ws || ws.readyState !== WebSocket.OPEN || !video.videoWidth) return;

@@ -1122,6 +1122,41 @@ document.addEventListener("keydown", e => {
     }
 });
 
+// -------- spoken alerts (browser TTS — zero hardware needed for the demo) ----
+S.audio = false;
+S.spoken = { follower: {}, reflexAt: 0 };
+function speak(text) {
+    if (!S.audio || !("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05; u.volume = 0.9;
+    speechSynthesis.speak(u);
+}
+$("audioToggle").addEventListener("click", () => {
+    S.audio = !S.audio;
+    $("audioToggle").textContent = S.audio ? "🔊 AUDIO" : "🔇 AUDIO";
+    if (S.audio) { speechSynthesis.cancel(); speak("HALO audio armed"); }
+});
+
+function audioAlerts(s) {
+    const followers = (s.memory && s.memory.followers) || [];
+    for (const fol of followers) {
+        const seen = S.spoken.follower[fol.id];
+        if (!seen) {
+            S.spoken.follower[fol.id] = { narrated: false };
+            speak(fol.narration || `Possible follower: ${fol.id.replace("-", " ")}`);
+        } else if (!seen.narrated && fol.narration) {
+            seen.narrated = true;
+            speak(fol.narration);
+        }
+    }
+    const now = performance.now();
+    if ((s.tracks || []).some(t => t.att_state === "REFLEX") && now - S.spoken.reflexAt > 3000) {
+        S.spoken.reflexAt = now;
+        const th = s.threat;
+        speak(`Reflex${th && th.direction_label ? " — " + th.direction_label.toLowerCase() : ""}`);
+    }
+}
+
 $("stabToggle").addEventListener("click", () => {
     S.stab = !S.stab;
     $("stabToggle").textContent = S.stab ? "STAB" : "RAW";
@@ -1163,6 +1198,7 @@ function frame() {
             drawWorld(s, tracks);
             drawTimeline(s);
             updateDom(s, tracks);
+            audioAlerts(s);
             if (S.replay) {
                 S.replay.idx += 1;
                 if (S.replay.idx >= S.snapshots.length) {
