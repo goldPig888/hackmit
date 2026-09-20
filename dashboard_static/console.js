@@ -57,7 +57,9 @@ const Mock = {
                 sigma: 0.5, ttc: null, tcpa: null, dcpa: null, risk: 0.04,
                 risk_level: "safe", conflict_type: "safe_pass", will_collide: false,
                 conflict_point: null, direction: "center", direction_label: "AROUND",
-                factors: {}, expanding: false, raw_px_rate: 8,
+                factors: {}, expanding: false, area_rate: 0.02, raw_px_rate: 8,
+            evidence: { proximity: 0.4, persistence: 0.3, rapid_approach: 0,
+                        heading_toward: 0, unusual_motion: 0.05, persistent_comovement: 0 },
                 attention: 0.12, att_state: "OBSERVE", reasons: [],
             };
         });
@@ -94,10 +96,13 @@ const Mock = {
             conflict_type: colliding ? "collision" : "safe_pass",
             will_collide: colliding, conflict_point: colliding ? carPath[Math.min(8, carPath.length - 1)] : null,
             direction: "left", direction_label: "BEHIND LEFT",
-            factors: {}, expanding: carD < 15, raw_px_rate: 40,
+            factors: {}, expanding: carD < 15, area_rate: carD < 15 ? 0.4 : 0.05, raw_px_rate: 40,
             attention: clamp(risk + 0.2, 0, 1),
             att_state: colliding ? "WARN" : (risk > 0.35 ? "ATTEND" : "OBSERVE"),
             reasons: colliding ? ["approaching wearer", "predicted paths overlap"] : ["approaching wearer"],
+            evidence: { rapid_approach: clamp(-(carD - 22) / 18, 0, 1), proximity: clamp(1 - carD / 20, 0, 1),
+                        heading_toward: 0.7, trajectory_conflict: colliding ? 1 : 0.2,
+                        rapid_expansion: carD < 15 ? 0.5 : 0.1, strike_motion: 0, persistence: 0.3 },
         }, {
             id: "person-12", cls: "person", confidence: 0.88, bbox: [80, 320, 40, 110],
             position: [8, 12], velocity: [0, 0.4], speed: 0.4,
@@ -138,6 +143,8 @@ const Mock = {
                 factors: {}, expanding: false, raw_px_rate: 12,
                 attention: 0.62, att_state: "ATTEND",
                 reasons: ["persistent co-movement", "bearing stable", "tracking 12.0s"],
+                evidence: { persistent_comovement: 0.8, persistence: 0.8, proximity: 0.55,
+                            heading_toward: 0.2, rapid_approach: 0.05, unusual_motion: 0.1 },
             });
         } else if (SCENARIO === "lunge") {
             density = "sparse"; environment = "indoor";
@@ -163,9 +170,14 @@ const Mock = {
                 conflict_type: lunging ? "collision" : "safe_pass",
                 will_collide: lunging, conflict_point: lunging ? [0.3, 0.4] : null,
                 direction: "right", direction_label: "FRONT RIGHT",
-                factors: {}, expanding: lunging, raw_px_rate: lunging ? 260 : 15,
+                factors: {}, expanding: lunging, area_rate: lunging ? 1.1 : 0.05,
+                raw_px_rate: lunging ? 260 : 15,
                 attention: lunging ? 1.0 : 0.2,
                 att_state: lunging ? "REFLEX" : "OBSERVE",
+                evidence: lunging
+                    ? { rapid_approach: 0.95, rapid_expansion: 0.9, strike_motion: 0.72,
+                        heading_toward: 0.85, proximity: 0.7, trajectory_conflict: 0.8 }
+                    : { proximity: 0.3, persistence: 0.4 },
                 reasons: lunging
                     ? ["rapid approach at close range", "closing 6.5 m/s", "image expanding fast", `est. contact ${(pd / 6.5).toFixed(1)}s`]
                     : [],
@@ -188,6 +200,8 @@ const Mock = {
             camera_pose: { yaw, pitch: 0.1, roll: 0, confidence: 0.9 },
             scene: { density, environment,
                      people: tracks.filter(x => x.cls === "person").length,
+                     vehicles: tracks.filter(x => x.cls !== "person").length,
+                     ego_motion: "walking",
                      reflex: tracks.some(x => x.att_state === "REFLEX") },
             rider_state: { position: [0, 0], velocity: [Math.sin(yaw) * 1.5, Math.cos(yaw) * 1.5],
                            speed: 1.5, heading: yaw, yaw_rate: 0.3 * Math.cos(t * 0.5),
@@ -199,7 +213,13 @@ const Mock = {
             threat: threatTrack ? { id: threatTrack.id, cls: threatTrack.cls,
                       direction_label: threatTrack.direction_label,
                       att_state: threatTrack.att_state, attention: threatTrack.attention,
-                      reasons: threatTrack.reasons,
+                      reasons: threatTrack.reasons, evidence: threatTrack.evidence,
+                      secondary: (() => {
+                          const s = tracks.find(x => x !== threatTrack && x.att_state !== "OBSERVE");
+                          return s ? { id: s.id, cls: s.cls, att_state: s.att_state,
+                                       attention: s.attention, direction_label: s.direction_label,
+                                       reasons: s.reasons } : null;
+                      })(),
                       risk: threatTrack.risk,
                       ttc: threatTrack.ttc, tcpa: threatTrack.tcpa,
                       dcpa: threatTrack.dcpa,
@@ -689,7 +709,9 @@ function updateDom(s, tracks) {
         ? `${scene.environment.toUpperCase()} · ${(scene.density || "--").toUpperCase()}`
         : (scene.density || "--").toUpperCase();
     $("stScene").querySelector("b").textContent =
-        sceneLabel + (scene.people != null ? ` · ${scene.people}p` : "");
+        sceneLabel + (scene.people != null ? ` · ${scene.people}p` : "")
+        + (scene.ego_motion && scene.ego_motion !== "stationary"
+            ? ` · ${scene.ego_motion.toUpperCase()}` : "");
     document.body.classList.toggle("reflex", Boolean(scene.reflex));
     reflexAlert(Boolean(scene.reflex));
 
@@ -717,10 +739,26 @@ function updateDom(s, tracks) {
                 whyHtml.push(`<li class="on">${reason}</li>`);
         }
         $("whyList").innerHTML = whyHtml.join("");
+
+        // evidence breakdown — attention as auditable channel scores
+        const ev = th.evidence || {};
+        const evRows = Object.entries(ev)
+            .sort((a, b) => b[1] - a[1]).slice(0, 5)
+            .map(([k, v]) => `<div class="ev-row"><span>${k.replace(/_/g, " ")}</span>` +
+                `<div class="ev-bar"><div style="width:${Math.round(v * 100)}%"></div></div>` +
+                `<b>${v.toFixed(2)}</b></div>`);
+        $("evBars").innerHTML = evRows.join("");
+
+        const sec = th.secondary;
+        $("thSec").textContent = sec
+            ? `${sec.att_state} · ${sec.cls} ${sec.id}`
+            : "—";
     } else {
         $("thId").textContent = "—"; $("thDir").textContent = "NO ACTIVE THREAT";
         $("thRisk").textContent = "0"; $("thRiskBar").style.width = "0%";
         $("whyList").innerHTML = `<li class="dim">no active threat</li>`;
+        $("evBars").innerHTML = "";
+        $("thSec").textContent = "—";
     }
 
     // This card deliberately sits on top of the camera, independent of whether

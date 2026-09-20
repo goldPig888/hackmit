@@ -16,8 +16,8 @@ class YOLODetector(BaseDetector):
     Wraps YOLO for compatibility with HALO detector plugin system.
     """
 
-    def __init__(self, model_path: str = "yolo11n.pt", tracker_config: str = "bytetrack.yaml", 
-                 allowed_classes: set[str] | None = None):
+    def __init__(self, model_path: str = "yolo11n.pt", tracker_config: str = "bytetrack.yaml",
+                 allowed_classes: set[str] | None = None, device: str | None = None):
         """Initialize YOLO detector.
         
         Args:
@@ -36,6 +36,14 @@ class YOLODetector(BaseDetector):
             "car", "truck", "bus", "motorcycle", "bicycle", "person"
         }
         self._supported_classes = set(self.model.names.values())
+        # Prefer Apple-Silicon GPU; ~2x faster than CPU for n-class models.
+        if device is None:
+            try:
+                import torch
+                device = "mps" if torch.backends.mps.is_available() else "cpu"
+            except Exception:
+                device = "cpu"
+        self.device = device
         # Compact per-epoch display IDs: ByteTrack's internal counter keeps
         # climbing forever, so map raw IDs onto 0..N and restart on reset().
         self._id_map: dict[int, int] = {}
@@ -65,7 +73,8 @@ class YOLODetector(BaseDetector):
         
         from ..models import Detection
         
-        result = self.model.track(frame, persist=True, tracker=self.tracker_config, verbose=False)[0]
+        result = self.model.track(frame, persist=True, tracker=self.tracker_config,
+                                  verbose=False, device=self.device)[0]
         detections = []
         
         if result.boxes.id is not None:

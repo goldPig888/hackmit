@@ -33,6 +33,7 @@ from halo.dashboard.world_state import WorldStateBuilder
 from halo.detectors import YOLODetector
 from halo.haptics import HapticPublisher
 from halo.imu.camera_pose import CameraIntrinsics
+from halo.pose_strike import PoseStrike
 
 
 class IPhoneHaloProcessor:
@@ -60,6 +61,7 @@ class IPhoneHaloProcessor:
             model_path=model_path,
             tracker_config=str(tracker_cfg) if tracker_cfg.exists() else "bytetrack.yaml")
         self.haptics = HapticPublisher(output_dir)
+        self.pose_strike = PoseStrike() if os.environ.get("HALO_POSE", "1") != "0" else None
 
         self.hfov_deg = hfov_deg
         self._intrinsics_set = False
@@ -78,6 +80,8 @@ class IPhoneHaloProcessor:
     def _clear_subjects(self) -> None:
         self.pipeline.reset()
         self.detector.reset()
+        if self.pose_strike:
+            self.pose_strike.reset()
         self.world_builder.reset()
         self._intrinsics_set = False
         self._last_cleanup = 0.0
@@ -105,6 +109,9 @@ class IPhoneHaloProcessor:
         self._ensure_intrinsics(frame)
 
         detections = self.detector.detect(frame, ts_s)
+        # Pose reflex path: strike-motion evidence, only on close-range persons
+        strike_ev = (self.pose_strike.update(frame, detections, ts_s)
+                     if self.pose_strike else {})
         imu = self.receiver.imu_tuple_at(ts_s)
         imu_status = "imu-ok" if imu else "NO-IMU"
 
@@ -134,6 +141,7 @@ class IPhoneHaloProcessor:
             frame_size=(frame.shape[1], frame.shape[0]),
             ts_s=ts_s,
             brightness=float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()),
+            strike_evidence=strike_ev,
         )
         self.server.set_world_state(state)
 

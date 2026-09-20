@@ -163,6 +163,15 @@ section, aside { background: var(--panel); display: flex; flex-direction: column
 .why-list li.on::before { content: "▸ "; color: var(--red); }
 .why-list li::before { content: "· "; }
 
+/* evidence channel bars */
+.ev-bars { margin-top: 6px; border-top: 1px solid var(--edge); padding-top: 5px; }
+.ev-row { display: flex; align-items: center; gap: 6px; font-size: 9px; padding: 1.5px 0; }
+.ev-row span { width: 78px; color: var(--dim); text-transform: capitalize; }
+.ev-bar { flex: 1; height: 5px; background: var(--edge); border-radius: 2px; overflow: hidden; }
+.ev-bar div { height: 100%; background: var(--amber); transition: width .2s; }
+.ev-row b { width: 26px; text-align: right; color: var(--dim); font-weight: 400; }
+.kv.secondary span, .kv.secondary b { color: var(--dim); font-size: 9px; }
+
 .diag-row { display: flex; align-items: center; gap: 8px; font-size: 9px; color: var(--dim); margin: 4px 0; }
 .diag-row span { width: 62px; }
 .diag-bar { flex: 1; height: 6px; background: var(--edge); border-radius: 2px; overflow: hidden; }

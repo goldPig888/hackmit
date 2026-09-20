@@ -15,7 +15,7 @@ from typing import Optional
 
 import numpy as np
 
-from ..attention import ATTEND, REFLEX, WARN, classify_scene, score_track
+from ..attention import ATTEND, REFLEX, WARN, build_context, score_track
 
 _INTENSITY = {"weak": 0.35, "medium": 0.65, "strong": 1.0}
 _GHOST_TIMES = (0.5, 1.0, 1.5, 2.0)
@@ -122,7 +122,8 @@ class WorldStateBuilder:
 
     def update(self, pipeline, detections, assessments, receiver,
                fps: float, haptic_endpoint_set: bool, frame_size, ts_s: float,
-               brightness: Optional[float] = None) -> dict:
+               brightness: Optional[float] = None,
+               strike_evidence: Optional[dict] = None) -> dict:
         """Produce one console state snapshot. Call once per processed frame."""
         ego = pipeline.ego_tracker.get_current_state()
         objects = pipeline.get_all_object_states()
@@ -162,11 +163,21 @@ class WorldStateBuilder:
         primary = None
         max_risk = 0.0
         n_people = sum(1 for o in objects if o.label == "person")
-        has_vehicle = any(o.label in ("car", "truck", "bus", "motorcycle")
-                          for o in objects)
-        density, environment = classify_scene(
+        n_vehicles = sum(1 for o in objects
+                         if o.label in ("car", "truck", "bus", "motorcycle"))
+        person_dists = [float(np.linalg.norm(np.asarray(o.position)[:2]))
+                        for o in objects if o.label == "person"]
+        mean_speed = (sum(float(np.linalg.norm(np.asarray(o.velocity)[:2]))
+                          for o in objects) / len(objects)) if objects else 0.0
+        ctx = build_context(
             n_people, len(objects), float(ego.speed),
-            brightness=brightness, has_vehicle=has_vehicle)
+            brightness=brightness, has_vehicle=n_vehicles > 0,
+            vehicle_count=n_vehicles,
+            mean_person_dist=(sum(person_dists) / len(person_dists)
+                              if person_dists else None),
+            mean_track_speed=mean_speed)
+        density, environment = ctx.density, ctx.environment
+        strike_evidence = strike_evidence or {}
         ego_moving = float(ego.speed) > 0.3
         funnel = {"perceived": len(detections), "tracked": len(objects),
                   "moving": 0, "closing": 0, "conflict": 0,
@@ -298,6 +309,7 @@ class WorldStateBuilder:
                 bearing_rate=bearing_rate,
                 duration_s=float(obj.duration_tracked),
                 expanding=expanding, area_rate=area_rate,
+                strike_motion=float(strike_evidence.get(oid, 0.0)),
                 raw_px_rate=raw_px_rate or 0.0,
                 ttc=ttc, will_collide=will_collide, label=obj.label,
                 density=density, environment=environment,
@@ -335,7 +347,7 @@ class WorldStateBuilder:
                 "expanding": expanding, "area_rate": area_rate,
                 "raw_px_rate": raw_px_rate,
                 "attention": att.attention, "att_state": att.state,
-                "reasons": att.reasons,
+                "reasons": att.reasons, "evidence": att.evidence,
             })
             # Always expose one primary track to the visual console. Risk only
             # controls its warning severity; it should not make the live
@@ -349,6 +361,14 @@ class WorldStateBuilder:
         if reflex_track is not None:
             primary = reflex_track
             max_risk = max(max_risk, 1.0)
+
+        # Alert arbitration: one primary report; next-most-elevated as secondary.
+        _prio = {REFLEX: 3, WARN: 2, ATTEND: 1}
+        elevated = sorted(
+            (t for t in tracks if t["att_state"] != "OBSERVE"),
+            key=lambda t: (_prio.get(t["att_state"], 0), t["attention"]),
+            reverse=True)
+        secondary = next((t for t in elevated if primary is None or t["id"] != primary["id"]), None)
 
         # --- counterfactual: rider goes straight instead of current action ---
         counterfactual = {"current_cpa": None, "straight_cpa": None,
@@ -388,7 +408,14 @@ class WorldStateBuilder:
                 "closing_rate": primary["closing_rate"],
                 "confidence": float(risk_by_id[primary["id"]].confidence) if primary["id"] in risk_by_id else 0.0,
                 "attention": primary["attention"], "att_state": primary["att_state"],
-                "reasons": primary["reasons"],
+                "reasons": primary["reasons"], "evidence": primary["evidence"],
+                "secondary": (
+                    {"id": secondary["id"], "cls": secondary["cls"],
+                     "att_state": secondary["att_state"],
+                     "attention": secondary["attention"],
+                     "direction_label": secondary["direction_label"],
+                     "reasons": secondary["reasons"]}
+                    if secondary else None),
                 "why": [
                     {"label": "closing rapidly", "active": primary["closing_rate"] < -0.5},
                     {"label": "bearing stable", "active": primary["bearing_rate"] is not None and abs(primary["bearing_rate"]) < 0.05},
@@ -411,7 +438,10 @@ class WorldStateBuilder:
             "camera_pose": {"yaw": cy, "pitch": cp, "roll": cr,
                             "confidence": float(pose.confidence) if pose else 0.0},
             "scene": {"density": density, "environment": environment,
-                      "people": n_people,
+                      "people": n_people, "vehicles": n_vehicles,
+                      "ego_motion": ctx.ego_motion,
+                      "proximity_baseline": ctx.proximity_baseline,
+                      "background_motion": ctx.background_motion,
                       "reflex": any(t["att_state"] == REFLEX for t in tracks)},
             "rider_state": {
                 "position": [0.0, 0.0],

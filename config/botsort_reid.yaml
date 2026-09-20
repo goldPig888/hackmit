@@ -10,7 +10,7 @@ track_buffer: 90
 match_thresh: 0.5
 fuse_score: True
 
-gmc_method: sparseOptFlow
+gmc_method: none   # IMU already compensates ego-motion; skip per-frame optflow
 
 proximity_thresh: 0.5
 appearance_thresh: 0.8
