@@ -34,6 +34,7 @@ class DashboardServer:
         self.phone_receiver = PhoneStreamReceiver()
         self.world_state: dict = {"ready": False}
         self.clear_subjects_handler: Optional[Callable[[], None]] = None
+        self._training_lab = None
 
     def _setup_routes(self) -> None:
         """Setup HTTP routes."""
@@ -51,6 +52,15 @@ class DashboardServer:
             web.get('/ingest', self.ingest_handler),
             web.get('/api/world', self.get_world_state),
             web.post('/api/clear-subjects', self.clear_subjects),
+            web.get('/example', self.serve_example),
+            web.get('/api/example', self.example_state),
+            web.get('/api/example/map', self.example_map),
+            web.get('/training', self.serve_training),
+            web.get('/api/training/status', self.training_status),
+            web.post('/api/training/train', self.training_train),
+            web.post('/api/training/stop', self.training_stop),
+            web.post('/api/training/evaluate', self.training_evaluate),
+            web.post('/api/training/reset', self.training_reset),
             web.static('/static', self._get_static_dir())
         ])
 
@@ -94,6 +104,69 @@ class DashboardServer:
     async def get_world_state(self, request: Request) -> Response:
         """Latest unified world-state snapshot for the console UI."""
         return web.json_response(self.world_state)
+
+    # ---------------- street example ----------------
+
+    def _street_sim(self):
+        """Lazy-init the MIT street sim (loads OSM map on first request)."""
+        if getattr(self, "_sim", None) is None:
+            from ..training.street_sim import get_sim
+            self._sim = get_sim()
+        return self._sim
+
+    async def serve_example(self, request: Request) -> Response:
+        path = self._get_static_dir() / "example.html"
+        if path.exists():
+            return web.FileResponse(path)
+        return web.Response(text="example.html missing", status=404)
+
+    async def example_state(self, request: Request) -> Response:
+        return web.json_response(self._street_sim().snapshot())
+
+    async def example_map(self, request: Request) -> Response:
+        return web.json_response(self._street_sim().map_data())
+
+    # ---------------- training lab ----------------
+
+    def _lab(self):
+        """Lazy-init the PPO lab so server startup stays fast."""
+        if self._training_lab is None:
+            from ..training.lab import TrainingLab
+            self._training_lab = TrainingLab(
+                Path(__file__).parent.parent.parent.parent / "runs" / "training")
+        return self._training_lab
+
+    async def serve_training(self, request: Request) -> Response:
+        path = self._get_static_dir() / "training.html"
+        if path.exists():
+            return web.FileResponse(path)
+        return web.Response(text="training.html missing", status=404)
+
+    async def training_status(self, request: Request) -> Response:
+        return web.json_response(self._lab().status())
+
+    async def training_train(self, request: Request) -> Response:
+        body = await request.json() if request.can_read_body else {}
+        episodes = int(body.get("episodes", 50))
+        self._lab().train_async(episodes=max(1, min(episodes, 500)))
+        return web.json_response({"ok": True})
+
+    async def training_stop(self, request: Request) -> Response:
+        self._lab().stop()
+        return web.json_response({"ok": True})
+
+    async def training_evaluate(self, request: Request) -> Response:
+        runs_dir = Path(__file__).parent.parent.parent.parent / "runs"
+        run_files = sorted(runs_dir.rglob("run_*.jsonl"))
+        return web.json_response(self._lab().evaluate(run_files))
+
+    async def training_reset(self, request: Request) -> Response:
+        from ..training.lab import TrainingLab
+        lab = self._lab()
+        lab.stop()
+        self._training_lab = TrainingLab(lab.out_dir)
+        self._training_lab.trainer.net = type(lab.trainer.net)()
+        return web.json_response({"ok": True})
 
     async def get_status(self, request: Request) -> Response:
         """Get current system status."""

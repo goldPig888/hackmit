@@ -19,7 +19,7 @@ body {
     font-family: var(--mono);
     height: 100vh;
     display: grid;
-    grid-template-rows: 34px 1fr 52px;
+    grid-template-rows: 30px 1fr 44px;
     overflow: hidden;
 }
 
@@ -51,14 +51,16 @@ body {
 /* ---------- main grid ---------- */
 main {
     display: grid;
-    grid-template-columns: 42fr 48fr 10fr;
-    gap: 1px; background: var(--edge); min-height: 0;
+    /* Each grid item may shrink, but the diagnostic rail always has enough
+       room for its labels. Contain overflow so it cannot paint over a view. */
+    grid-template-columns: minmax(0, 43fr) minmax(0, 49fr) minmax(168px, 12fr);
+    gap: 1px; background: var(--edge); min-height: 0; overflow: hidden;
 }
-section, aside { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+section, aside { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 
 .panel-head {
     display: flex; align-items: center; gap: 10px;
-    padding: 7px 12px; border-bottom: 1px solid var(--edge);
+    padding: 5px 12px; border-bottom: 1px solid var(--edge);
     font-size: 10px; letter-spacing: 2px; color: var(--dim);
     flex: 0 0 auto;
 }
@@ -73,6 +75,25 @@ section, aside { background: var(--panel); display: flex; flex-direction: column
     padding: 3px 8px; cursor: pointer;
 }
 #stabToggle:hover { border-color: var(--cyan); }
+
+.expand-btn { margin-left: auto; border: 1px solid var(--edge); background: none;
+              color: var(--dim); font-size: 12px; line-height: 1;
+              padding: 3px 8px; cursor: pointer; border-radius: 3px; }
+.expand-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+
+/* Expanded view is an isolated viewport layer. Nothing from the dashboard
+   grid, rail, topbar, or timeline can occupy this layer or bleed over it. */
+section.expanded {
+    position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100dvh;
+    border: none; overflow: hidden; isolation: isolate;
+}
+section.expanded .cam-wrap,
+section.expanded #worldCanvas { flex: 1 1 auto; min-height: 0; }
+body.has-expanded { cursor: zoom-out; overflow: hidden; }
+body.has-expanded > #topbar,
+body.has-expanded > #timelinePanel,
+body.has-expanded main > section:not(.expanded),
+body.has-expanded main > aside { visibility: hidden; pointer-events: none; }
 
 /* ---------- camera panel ---------- */
 .cam-wrap { position: relative; flex: 1 1 400px; min-height: 400px; background: #000; overflow: hidden; }
@@ -138,7 +159,7 @@ section, aside { background: var(--panel); display: flex; flex-direction: column
 #replayBtn.active { background: var(--amber); color: #000; }
 
 /* ---------- threat rail ---------- */
-#threatRail { overflow-y: auto; }
+#threatRail { overflow-x: hidden; overflow-y: auto; min-width: 0; }
 .rail-block { border-bottom: 1px solid var(--edge); padding: 10px 12px; }
 .rail-label { font-size: 9px; letter-spacing: 2px; color: var(--dim); margin-bottom: 8px; }
 
@@ -231,3 +252,8 @@ body.reflex .live-dot { background: var(--red); box-shadow: 0 0 10px var(--red);
     #threatRail { max-height: 300px; }
     .cam-wrap, #worldCanvas { min-height: min(62vh, 520px); }
 }
+
+/* episodic memory / follower alert */
+.kv.memory span { color: #f472b6; }
+.kv.memory b { color: #f472b6; }
+.mem-note { font-size: 8.5px; color: #b98aa5; margin-top: 3px; line-height: 1.4; }

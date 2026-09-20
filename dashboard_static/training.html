@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HALO — Training Lab</title>
+<style>
+:root { --bg:#0a0e1a; --panel:#0d1420; --edge:#1a2332; --txt:#e6edf7; --dim:#8892b0;
+        --red:#ff4d5e; --amber:#ffb347; --green:#4ade80; --cyan:#22d3ee; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--txt); font: 13px/1.5 "SF Mono", ui-monospace, monospace; }
+header { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+         border-bottom: 1px solid var(--edge); }
+header h1 { font-size: 15px; letter-spacing: 2px; }
+header .sub { color: var(--dim); font-size: 11px; flex: 1; }
+.pill { padding: 4px 12px; border: 1px solid var(--edge); border-radius: 20px;
+        font-size: 10px; letter-spacing: 1px; }
+.pill.on { border-color: var(--green); color: var(--green); }
+nav { padding: 0 20px; } nav a { color: var(--cyan); font-size: 11px; text-decoration: none; }
+section { border: 1px solid var(--edge); border-radius: 8px; margin: 14px 20px;
+          background: var(--panel); padding: 14px 16px; }
+.sec-label { font-size: 10px; letter-spacing: 2px; color: var(--dim); margin-bottom: 10px; }
+.cols { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+.cols3 { display: grid; grid-template-columns: 1fr 1fr 260px; gap: 16px; }
+canvas { display: block; width: 100%; background: #080d16; border-radius: 6px; }
+#epCanvas { aspect-ratio: 16/9; } #curveCanvas, #lossCanvas { height: 160px; }
+.canvas-label { font-size: 9px; color: var(--dim); letter-spacing: 1px; margin: 4px 0 2px; }
+.kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+.kv span { color: var(--dim); } .kv b { font-weight: 400; }
+.big { font-size: 26px; font-weight: 600; }
+.act { font-size: 18px; letter-spacing: 1px; }
+.act.OBSERVE { color: var(--dim); } .act.ATTEND { color: var(--amber); }
+.act.WARN { color: var(--red); }
+.ok { color: var(--green); } .bad { color: var(--red); }
+button { background: var(--edge); color: var(--txt); border: 1px solid #2a3a52;
+         border-radius: 6px; padding: 8px 14px; font: inherit; font-size: 11px;
+         letter-spacing: 1px; cursor: pointer; }
+button:hover { background: #223047; }
+button.primary { background: #13314f; border-color: #2a5a86; }
+.btn-row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--edge); }
+th { color: var(--dim); font-weight: 400; letter-spacing: 1px; font-size: 10px; }
+.bar-row { display: flex; align-items: center; gap: 8px; font-size: 10px; padding: 2px 0; }
+.bar-row span { width: 70px; color: var(--dim); }
+.bar { flex: 1; height: 8px; background: var(--edge); border-radius: 3px; overflow: hidden; }
+.bar div { height: 100%; background: var(--cyan); transition: width .3s; }
+.bar-row b { width: 40px; text-align: right; font-weight: 400; }
+.prob-row b { color: var(--txt); }
+.reward-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 20px;
+                 font-size: 10px; color: var(--dim); margin-top: 8px; }
+.reward-legend b { float: right; }
+.note { color: var(--dim); font-size: 10px; margin-top: 8px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+</style>
+</head>
+<body>
+<header>
+    <h1>HALO / TRAINING</h1>
+    <div class="sub">Learning when the world deserves your attention</div>
+    <div class="pill" id="stPill">IDLE</div>
+    <nav><a href="/demo">← console</a></nav>
+</header>
+
+<section>
+    <div class="sec-label">1 · SCENARIO REPLAY — POLICY VS GROUND TRUTH</div>
+    <div class="cols">
+        <canvas id="epCanvas" width="800" height="450"></canvas>
+        <div>
+            <div class="kv"><span>episode</span><b id="epNo">—</b></div>
+            <div class="kv"><span>scenario</span><b id="epScenario">—</b></div>
+            <div class="kv"><span>context</span><b id="epContext">—</b></div>
+            <div class="kv"><span>distance</span><b id="epDist">—</b></div>
+            <div class="kv"><span>closing</span><b id="epClose">—</b></div>
+            <hr style="border-color:var(--edge);margin:8px 0">
+            <div class="kv"><span>ground truth</span><b class="act" id="epLabel">—</b></div>
+            <div class="kv"><span>policy action</span><b class="act" id="epAction">—</b></div>
+            <div class="kv"><span>reward</span><b id="epReward">—</b></div>
+            <hr style="border-color:var(--edge);margin:8px 0">
+            <div class="sec-label">POLICY π(a|s)</div>
+            <div id="probBars"></div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="sec-label">2 · TRAINING PROGRESS</div>
+    <div class="cols3">
+        <div>
+            <div class="canvas-label">EPISODE REWARD</div>
+            <canvas id="curveCanvas" width="800" height="160"></canvas>
+        </div>
+        <div>
+            <div class="canvas-label">PPO LOSSES (policy / value / entropy)</div>
+            <canvas id="lossCanvas" width="800" height="160"></canvas>
+        </div>
+        <div>
+            <div class="kv"><span>episodes</span><b id="mEp">0</b></div>
+            <div class="kv"><span>mean reward</span><b id="mReward">—</b></div>
+            <div class="kv"><span>label accuracy</span><b id="mAcc">—</b></div>
+            <div class="kv"><span>ppo updates</span><b id="mUpd">0</b></div>
+            <hr style="border-color:var(--edge);margin:8px 0">
+            <div class="sec-label">ACTION DISTRIBUTION</div>
+            <div id="distBars"></div>
+        </div>
+    </div>
+    <div class="reward-legend">
+        <div>correct action <b>+2</b></div>
+        <div>early warning <b>+1</b></div>
+        <div>unnecessary attend <b>−1</b></div>
+        <div>false warn <b>−3</b></div>
+        <div>missed warn <b>−6</b></div>
+        <div>repeat bother <b>−0.1</b></div>
+    </div>
+</section>
+
+<section>
+    <div class="sec-label">3 · SIMULATION</div>
+    <div class="note">PPO learns attention over HALO world-state vectors — never pixels.
+        REFLEX stays outside the policy: deterministic reflex rules always win arbitration.
+        Labels come from the simulator's true future closest-approach.</div>
+    <div class="btn-row">
+        <button class="primary" onclick="train(50)">TRAIN 50 EPISODES</button>
+        <button onclick="train(50)">KEEP TRAINING +50</button>
+        <button onclick="post('stop')">STOP</button>
+        <button onclick="evaluate()">EVALUATE (SIM + RECORDED RUNS)</button>
+        <button onclick="resetLab()">RESET POLICY</button>
+    </div>
+    <div class="note" id="lastBatch"></div>
+    <table style="margin-top:10px">
+        <tr><th>scenario</th><th>episodes</th><th>mean reward</th><th>accuracy</th></tr>
+        <tbody id="scenTable"></tbody>
+    </table>
+    <div class="note">Sorted by weakest mean reward first — the rows that need work.</div>
+</section>
+
+<section>
+    <div class="sec-label">4 · RESULTS — BEFORE / AFTER</div>
+    <table>
+        <tr><th></th><th>mean reward</th><th>accuracy</th><th>false alerts</th><th>missed threats</th><th></th></tr>
+        <tr><td>SIM — before</td><td id="bR">—</td><td id="bA">—</td><td id="bF">—</td><td id="bM">—</td><td id="bN"></td></tr>
+        <tr><td>SIM — after</td><td id="aR">—</td><td id="aA">—</td><td id="aF">—</td><td id="aM">—</td><td id="aN"></td></tr>
+        <tr><td>REAL — before</td><td id="rbR">—</td><td id="rbA">—</td><td id="rbF">—</td><td id="rbM">—</td><td id="rbN"></td></tr>
+        <tr><td>REAL — after</td><td id="raR">—</td><td id="raA">—</td><td id="raF">—</td><td id="raM">—</td><td id="raN"></td></tr>
+    </table>
+    <div class="note">REAL rows evaluate the policy on recorded live frames, using HALO's
+        heuristic action as teacher — policy optimization against HALO's prototype
+        objective, not independently labeled ground truth.</div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const epC = $("epCanvas"), epX = epC.getContext("2d");
+const cuC = $("curveCanvas"), cuX = cuC.getContext("2d");
+let frameIdx = 0;
+
+async function post(path, body) {
+    await fetch("/api/training/" + path, { method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {}) });
+}
+function train(n) { post("train", { episodes: n }); }
+async function evaluate() { await post("evaluate"); }  // next poll renders it
+async function resetLab() { await post("reset"); $("stPill").textContent = "RESET"; }
+
+function bars(el, vals, names, probs) {
+    $(el).innerHTML = vals.map((v, i) =>
+        `<div class="bar-row ${probs ? "prob-row" : ""}"><span>${names[i]}</span>` +
+        `<div class="bar"><div style="width:${v * 100}%"></div></div><b>${(v * 100).toFixed(0)}%</b></div>`
+    ).join("");
+}
+
+const loC = $("lossCanvas"), loX = loC.getContext("2d");
+
+function drawLoss(curve) {
+    const W = loC.width, H = loC.height;
+    loX.clearRect(0, 0, W, H);
+    if (!curve || curve.length < 2) return;
+    const series = [
+        { key: "pi_loss", color: "#22d3ee" },
+        { key: "v_loss", color: "#ffb347", scale: 0.1 },   // value loss is larger — scale to share axes
+        { key: "entropy", color: "#8892b0" },
+    ];
+    const all = curve.flatMap(c => [c.pi_loss, c.v_loss * 0.1, c.entropy]);
+    const lo = Math.min(...all, 0), hi = Math.max(...all, 0.1);
+    const X = i => (i / (curve.length - 1)) * (W - 20) + 10;
+    const Y = v => H - 14 - ((v - lo) / (hi - lo || 1)) * (H - 28);
+    for (const s of series) {
+        loX.strokeStyle = s.color; loX.lineWidth = 1.2; loX.beginPath();
+        curve.forEach((c, i) => {
+            const v = c[s.key] * (s.scale || 1);
+            i ? loX.lineTo(X(i), Y(v)) : loX.moveTo(X(0), Y(v));
+        });
+        loX.stroke();
+    }
+    loX.fillStyle = "#8892b0"; loX.font = "9px monospace";
+    loX.fillText("π", 12, 12); loX.fillStyle = "#ffb347"; loX.fillText("V×0.1", 24, 12);
+    loX.fillStyle = "#8892b0"; loX.fillText("H", 56, 12);
+    loX.fillText("upd " + curve[curve.length - 1].update, W - 50, H - 3);
+}
+
+function drawCurve(curve) {
+    const W = cuC.width, H = cuC.height;
+    cuX.clearRect(0, 0, W, H);
+    if (!curve || curve.length < 2) return;
+    const rs = curve.map(c => c.reward);
+    const lo = Math.min(...rs, 0), hi = Math.max(...rs, 1);
+    const X = i => (i / (curve.length - 1)) * (W - 20) + 10;
+    const Y = r => H - 14 - ((r - lo) / (hi - lo || 1)) * (H - 28);
+    cuX.strokeStyle = "#1a2332"; cuX.beginPath();
+    cuX.moveTo(0, Y(0)); cuX.lineTo(W, Y(0)); cuX.stroke();
+    cuX.strokeStyle = "#4ade80"; cuX.lineWidth = 1.5; cuX.beginPath();
+    curve.forEach((c, i) => i ? cuX.lineTo(X(i), Y(c.reward)) : cuX.moveTo(X(0), Y(c.reward)));
+    cuX.stroke();
+    cuX.fillStyle = "#8892b0"; cuX.font = "9px monospace";
+    cuX.fillText("ep " + curve[0].ep, 10, H - 3);
+    cuX.fillText("ep " + curve[curve.length - 1].ep, W - 50, H - 3);
+    cuX.fillText("+" + hi.toFixed(0), W - 30, 12);
+    cuX.fillText(lo.toFixed(0), W - 30, H - 16);
+}
+
+function drawEpisode(st) {
+    const W = epC.width, H = epC.height;
+    epX.clearRect(0, 0, W, H);
+    const steps = st.steps || [];
+    if (!steps.length) {
+        epX.fillStyle = "#8892b0"; epX.font = "12px monospace"; epX.textAlign = "center";
+        epX.fillText("press TRAIN to generate episodes", W / 2, H / 2);
+        epX.textAlign = "left"; return;
+    }
+    const stp = steps[frameIdx % steps.length];
+    const cx = W / 2, cy = H * 0.72, scale = 16;
+    // grid rings
+    epX.strokeStyle = "#131c2c";
+    for (let r = 4; r <= 16; r += 4) {
+        epX.beginPath(); epX.arc(cx, cy, r * scale, 0, 6.29); epX.stroke();
+    }
+    // ambient dots
+    for (const p of stp.ambient) {
+        epX.fillStyle = "rgba(120,140,160,0.35)";
+        epX.beginPath(); epX.arc(cx + p[0] * scale, cy - p[1] * scale, 3, 0, 6.29); epX.fill();
+    }
+    // wearer
+    epX.fillStyle = "#22d3ee";
+    epX.beginPath(); epX.arc(cx, cy, 7, 0, 6.29); epX.fill();
+    epX.fillStyle = "#22d3ee"; epX.font = "10px monospace";
+    epX.fillText("YOU", cx + 11, cy + 3);
+    // subject
+    const col = stp.action === "WARN" ? "#ff4d5e" : stp.action === "ATTEND" ? "#ffb347" : "#8892b0";
+    const sx = cx + stp.pos[0] * scale, sy = cy - stp.pos[1] * scale;
+    epX.strokeStyle = col; epX.setLineDash([4, 4]);
+    epX.beginPath(); epX.moveTo(sx, sy); epX.lineTo(cx, cy); epX.stroke();
+    epX.setLineDash([]);
+    epX.fillStyle = col;
+    epX.beginPath(); epX.arc(sx, sy, 6, 0, 6.29); epX.fill();
+    if (stp.action === "WARN") {
+        epX.strokeStyle = "rgba(255,77,94,0.5)";
+        epX.beginPath(); epX.arc(sx, sy, 10 + 3 * Math.sin(performance.now() / 150), 0, 6.29); epX.stroke();
+    }
+    epX.fillText("subject", sx + 9, sy + 3);
+    return stp;
+}
+
+function renderEval(eb, ea) {
+    const cell = (id, v) => $(id).textContent = v ?? "—";
+    if (eb) {
+        const s = eb.sim || {}, r = eb.real || {};
+        cell("bR", s.mean_reward); cell("bA", s.accuracy); cell("bF", s.false_alerts); cell("bM", s.missed_threats); cell("bN", s.episodes ? s.episodes + " eps" : "");
+        cell("rbR", r.mean_reward); cell("rbA", r.accuracy); cell("rbF", r.false_alerts); cell("rbM", r.missed_threats); cell("rbN", r.frames ? r.frames + " fr" : (r.note || ""));
+    }
+    if (ea) {
+        const s = ea.sim || {}, r = ea.real || {};
+        cell("aR", s.mean_reward); cell("aA", s.accuracy); cell("aF", s.false_alerts); cell("aM", s.missed_threats); cell("aN", s.episodes ? s.episodes + " eps" : "");
+        cell("raR", r.mean_reward); cell("raA", r.accuracy); cell("raF", r.false_alerts); cell("raM", r.missed_threats); cell("raN", r.frames ? r.frames + " fr" : (r.note || ""));
+    }
+}
+
+async function poll() {
+    try {
+        const st = await (await fetch("/api/training/status")).json();
+        $("stPill").textContent = st.training ? "● PPO TRAINING" : "IDLE";
+        $("stPill").className = "pill" + (st.training ? " on" : "");
+        $("epNo").textContent = st.episode_no;
+        $("epScenario").textContent = st.scenario || "—";
+        $("epContext").textContent = (st.context || "—").replace("_", " · ").toUpperCase();
+        $("mEp").textContent = st.episode_no;
+        $("mReward").textContent = st.mean_reward ?? "—";
+        $("mAcc").textContent = st.accuracy != null ? (st.accuracy * 100).toFixed(0) + "%" : "—";
+        $("mUpd").textContent = st.updates;
+        bars("distBars", st.action_dist || [0, 0, 0], ["OBSERVE", "ATTEND", "WARN"]);
+        if (st.policy_probs) bars("probBars", st.policy_probs, ["OBSERVE", "ATTEND", "WARN"], true);
+        drawCurve(st.curve);
+        drawLoss(st.loss_curve);
+        renderEval(st.eval_before, st.eval_after);
+        $("scenTable").innerHTML = (st.scenarios || []).map(s =>
+            `<tr><td>${s.name.replace(/_/g, " ")}</td><td>${s.episodes}</td>` +
+            `<td class="${s.mean_reward > 0 ? "ok" : "bad"}">${s.mean_reward}</td>` +
+            `<td>${(s.acc * 100).toFixed(0)}%</td></tr>`).join("");
+        $("lastBatch").textContent = st.last_batch
+            ? `LAST BATCH: ${st.last_batch.episodes} eps · mean reward ${st.last_batch.mean_reward} · ` +
+              `acc ${(st.last_batch.mean_acc * 100).toFixed(0)}% · ${st.last_batch.scenarios.join(", ")}`
+            : "";
+        const stp = drawEpisode(st);
+        if (stp) {
+            $("epDist").textContent = stp.dist + " m";
+            $("epClose").textContent = stp.closing + " m/s";
+            const match = stp.action === stp.label;
+            $("epLabel").textContent = stp.label; $("epLabel").className = "act " + stp.label;
+            $("epAction").textContent = stp.action; $("epAction").className = "act " + stp.action;
+            $("epReward").textContent = (stp.reward > 0 ? "+" : "") + stp.reward.toFixed(1);
+            $("epReward").className = stp.reward > 0 ? "ok" : "bad";
+        }
+    } catch (e) { /* server busy */ }
+}
+setInterval(poll, 250);
+setInterval(() => frameIdx++, 100);   // ~10fps replay, matches _DT
+poll();
+</script>
+</body>
+</html>

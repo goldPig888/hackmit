@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HALO / STREETS</title>
+<style>
+  :root { --bg:#05080b; --panel:#0a0f14; --edge:#1a2430; --txt:#c8d6e0;
+          --dim:#5a7080; --cyan:#22d3ee; --amber:#fbbf24; --red:#f87171; --green:#34d399; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:12px/1.5 "SF Mono",Menlo,monospace;
+         height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  header { display:flex; align-items:baseline; gap:14px; padding:10px 16px;
+           border-bottom:1px solid var(--edge); }
+  header h1 { font-size:14px; letter-spacing:3px; color:#e8f2f8; }
+  header .sub { color:var(--dim); font-size:10px; letter-spacing:1px; }
+  header .live { margin-left:auto; color:var(--green); font-size:10px; }
+  main { flex:1; display:grid; grid-template-columns:1fr 260px; min-height:0; }
+  #mapWrap { position:relative; min-width:0; }
+  #map { position:absolute; inset:0; width:100%; height:100%; }
+  #banner { position:absolute; top:14px; left:50%; transform:translateX(-50%);
+            padding:8px 18px; border:1px solid var(--amber); border-radius:4px;
+            background:rgba(10,14,20,.92); color:var(--amber); font-size:12px;
+            letter-spacing:2px; display:none; text-align:center; }
+  #banner.warn { display:block; }
+  #banner .sub2 { font-size:10px; color:var(--txt); letter-spacing:1px; margin-top:2px; }
+  #banner.reflex { border-color:var(--red); color:var(--red); }
+  aside { border-left:1px solid var(--edge); background:var(--panel);
+          padding:12px; overflow-y:auto; font-size:10px; }
+  aside h2 { font-size:10px; letter-spacing:2px; color:var(--dim);
+             margin:14px 0 6px; border-bottom:1px solid var(--edge); padding-bottom:4px; }
+  aside h2:first-child { margin-top:0; }
+  .stat { display:flex; justify-content:space-between; padding:2px 0; }
+  .stat b { color:var(--cyan); }
+  .danger { padding:4px 0; border-bottom:1px dotted var(--edge); }
+  .danger .nm { color:var(--amber); }
+  .ev { padding:2px 0; color:var(--dim); }
+  .ev.warn { color:var(--amber); }
+  .legend i { display:inline-block; width:8px; height:8px; border-radius:50%;
+              margin-right:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HALO / STREETS</h1>
+  <span class="sub">REAL OSM GEOMETRY · MIT CAMPUS · SIMULATED AGENTS</span>
+  <span class="live" id="live">● CONNECTING</span>
+</header>
+<main>
+  <div id="mapWrap">
+    <canvas id="map"></canvas>
+    <div id="banner"><div id="bannerTitle">PREDICTED CONFLICT</div><div class="sub2" id="bannerSub"></div></div>
+  </div>
+  <aside>
+    <h2>SESSION</h2>
+    <div class="stat"><span>sim time</span><b id="stT">—</b></div>
+    <div class="stat"><span>agents tracked</span><b id="stA">—</b></div>
+    <div class="stat"><span>attending</span><b id="stAt">—</b></div>
+    <div class="stat"><span>warnings</span><b id="stW">—</b></div>
+    <div class="stat"><span>near misses</span><b id="stN">—</b></div>
+    <h2>DANGER RANKING <span style="color:var(--dim)">(observed)</span></h2>
+    <div id="dangerList"><div class="ev">accumulating…</div></div>
+    <h2>KNOWN HOTSPOTS</h2>
+    <div id="hotList"></div>
+    <h2>EVENTS</h2>
+    <div id="evList"></div>
+    <h2>LEGEND</h2>
+    <div class="legend">
+      <div><i style="background:#5a7080"></i>observed</div>
+      <div><i style="background:var(--amber)"></i>attended</div>
+      <div><i style="background:var(--red)"></i>warned</div>
+      <div><i style="background:var(--cyan)"></i>you</div>
+      <div><i style="background:#3b82f6"></i>marked crossing</div>
+    </div>
+  </aside>
+</main>
+<script>
+const cv = document.getElementById("map"), ctx = cv.getContext("2d");
+const wrap = document.getElementById("mapWrap");
+const STATE_COL = { OBSERVE:"#4a5a68", ATTEND:"#fbbf24", WARN:"#f87171" };
+const CLS_SHAPE = { car:"rect", person:"dot", bicycle:"dot", you:"dot" };
+let MAP = null, SNAP = null, zoom = 1.1;      // px per meter
+
+wrap.addEventListener("wheel", e => {
+  e.preventDefault();
+  zoom = Math.min(6, Math.max(0.4, zoom * (e.deltaY < 0 ? 1.15 : 1/1.15)));
+}, { passive:false });
+
+async function load() {
+  const r = await fetch("/api/example/map");
+  MAP = await r.json();
+  poll(); setInterval(poll, 160); requestAnimationFrame(draw);
+}
+async function poll() {
+  try {
+    const r = await fetch("/api/example");
+    SNAP = await r.json();
+    document.getElementById("live").textContent = "● LIVE";
+    updatePanel();
+  } catch(e) { document.getElementById("live").textContent = "● OFFLINE"; }
+}
+
+function updatePanel() {
+  const s = SNAP.stats;
+  stT.textContent = SNAP.t.toFixed(0) + "s";
+  stA.textContent = s.agents;
+  stAt.textContent = s.attend;
+  stW.textContent = s.warnings;
+  stN.textContent = s.near_misses;
+  dangerList.innerHTML = SNAP.danger_ranking.length
+    ? SNAP.danger_ranking.map((c,i) =>
+        `<div class="danger"><span class="nm">#${i+1}</span> crossing (${c.pos[0].toFixed(0)}, ${c.pos[1].toFixed(0)}) — ${c.events} close calls</div>`).join("")
+    : '<div class="ev">accumulating…</div>';
+  evList.innerHTML = SNAP.events.slice().reverse().map(e =>
+    `<div class="ev warn">t${e.ts.toFixed(0)} ${e.type} — ${e.label}</div>`).join("");
+  const th = SNAP.threat;
+  const b = document.getElementById("banner");
+  if (th && th.state === "WARN") {
+    b.className = "warn";
+    bannerTitle.textContent = th.overlap ? "PREDICTED CONFLICT" : "CLOSE PROXIMITY";
+    bannerSub.textContent = `${th.cls} · ${th.label} · ${th.dist}m` +
+      (th.tcpa != null ? ` · tCPA ${th.tcpa}s` : "");
+  } else b.className = "";
+}
+hotList.innerHTML = "";
+fetch("/api/example/map").then(r=>r.json()).then(m => {
+  hotList.innerHTML = m.hotspots.map(h =>
+    `<div class="danger"><span class="nm">⚠</span> ${h.name}<br><span style="color:var(--dim)">${h.note}</span></div>`).join("");
+});
+
+const ROAD_W = { primary:3.5, secondary:2.8, tertiary:2.2, residential:1.6,
+                 unclassified:1.4, service:1.0, living_street:1.0,
+                 pedestrian:0.8, footway:0.6, path:0.6, cycleway:0.8, steps:0.5 };
+const ROAD_C = { primary:"#22323e", secondary:"#1e2b36", tertiary:"#1b2732",
+                 residential:"#172028", footway:"#131a22", path:"#131a22",
+                 cycleway:"#16303a", pedestrian:"#131a22", service:"#141c24",
+                 unclassified:"#172028", living_street:"#172028", steps:"#10161d" };
+
+function draw() {
+  const r = wrap.getBoundingClientRect();
+  const dpr = devicePixelRatio || 1;
+  cv.width = r.width*dpr; cv.height = r.height*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle = "#05080b"; ctx.fillRect(0,0,r.width,r.height);
+  if (!MAP || !SNAP) { requestAnimationFrame(draw); return; }
+
+  const wx = SNAP.wearer.pos[0], wy = SNAP.wearer.pos[1];
+  const w2s = p => [r.width/2 + (p[0]-wx)*zoom, r.height/2 - (p[1]-wy)*zoom];
+
+  // roads
+  for (const w of MAP.ways) {
+    ctx.strokeStyle = ROAD_C[w.type] || "#141c24";
+    ctx.lineWidth = (ROAD_W[w.type] || 1) * Math.min(zoom,2);
+    ctx.beginPath();
+    w.pts.forEach((p,i) => { const q = w2s(p); i ? ctx.lineTo(q[0],q[1]) : ctx.moveTo(q[0],q[1]); });
+    ctx.stroke();
+  }
+  // road names (major roads only, at low clutter)
+  if (zoom > 0.7) {
+    ctx.fillStyle = "rgba(90,110,130,0.5)"; ctx.font = "9px monospace";
+    const seen = new Set();
+    for (const w of MAP.ways) {
+      if (!w.name || seen.has(w.name) || !["primary","secondary","tertiary"].includes(w.type)) continue;
+      seen.add(w.name);
+      const mid = w2s(w.pts[Math.floor(w.pts.length/2)]);
+      ctx.fillText(w.name.toUpperCase(), mid[0]+4, mid[1]);
+    }
+  }
+  // crossings
+  ctx.fillStyle = "rgba(80,140,255,0.35)";
+  for (const c of MAP.crossings) {
+    const q = w2s(c);
+    ctx.fillRect(q[0]-1.5, q[1]-1.5, 3, 3);
+  }
+  // hotspots pulse
+  const t = performance.now()/1000;
+  for (const h of MAP.hotspots) {
+    const q = w2s(h.pos);
+    const rr = 8 + 4*Math.sin(t*2.5);
+    ctx.strokeStyle = "rgba(248,113,113,0.5)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(q[0],q[1],rr,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle = "rgba(248,113,113,0.9)"; ctx.font = "9px monospace";
+    ctx.fillText("⚠ " + h.name.toUpperCase(), q[0]+10, q[1]-10);
+  }
+
+  // agent tracks + predicted paths (attended/warned only)
+  for (const a of SNAP.agents) {
+    const col = STATE_COL[a.state] || "#4a5a68";
+    if (a.track && a.track.length > 1 && a.state !== "OBSERVE") {
+      ctx.strokeStyle = col + "55"; ctx.lineWidth = 1;
+      ctx.beginPath();
+      a.track.forEach((p,i) => { const q = w2s(p); i ? ctx.lineTo(q[0],q[1]) : ctx.moveTo(q[0],q[1]); });
+      ctx.stroke();
+    }
+    if (a.predicted && a.predicted.length > 1) {
+      ctx.strokeStyle = col + "aa"; ctx.lineWidth = 1.5; ctx.setLineDash([4,4]);
+      ctx.beginPath();
+      a.predicted.forEach((p,i) => { const q = w2s(p); i ? ctx.lineTo(q[0],q[1]) : ctx.moveTo(q[0],q[1]); });
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+  }
+  // agents
+  for (const a of SNAP.agents) {
+    const q = w2s(a.pos);
+    const col = STATE_COL[a.state] || "#4a5a68";
+    const rad = a.cls === "car" ? 3.5 : 2.5;
+    ctx.fillStyle = a.cls === "car" ? "#0d1218" : col;
+    ctx.strokeStyle = col; ctx.lineWidth = a.state === "WARN" ? 2 : 1;
+    if (a.cls === "car") {
+      ctx.save(); ctx.translate(q[0],q[1]); ctx.rotate(-a.heading);
+      ctx.fillRect(-rad*1.6,-rad,rad*3.2,rad*2);
+      ctx.strokeRect(-rad*1.6,-rad,rad*3.2,rad*2);
+      ctx.restore();
+    } else {
+      ctx.beginPath(); ctx.arc(q[0],q[1],rad,0,Math.PI*2);
+      ctx.fill(); ctx.stroke();
+      if (a.crossing) { ctx.strokeStyle = "#93c5fd"; ctx.beginPath(); ctx.arc(q[0],q[1],rad+2.5,0,Math.PI*2); ctx.stroke(); }
+    }
+  }
+  // wearer
+  const wp = w2s(SNAP.wearer.pos);
+  const wh = SNAP.wearer.heading;
+  if (SNAP.wearer.predicted.length > 1) {
+    ctx.strokeStyle = "rgba(34,211,238,0.7)"; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    SNAP.wearer.predicted.forEach((p,i) => { const q=w2s(p); i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.strokeStyle = "#22d3ee"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(wp[0],wp[1],7,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(wp[0],wp[1]);
+  ctx.lineTo(wp[0]+Math.sin(wh)*14, wp[1]-Math.cos(wh)*14); ctx.stroke();
+  ctx.fillStyle = "#22d3ee"; ctx.font = "bold 9px monospace";
+  ctx.fillText("YOU", wp[0]+10, wp[1]-8);
+
+  // threat conflict X
+  const th = SNAP.threat;
+  if (th && th.state === "WARN" && th.tcpa != null) {
+    const ag = SNAP.agents.find(a => a.id === th.id);
+    if (ag) {
+      // cpa point ≈ wearer pos advanced by tcpa along heading + agent pos advanced
+      const cx = SNAP.wearer.pos[0] + Math.sin(wh)*SNAP.wearer.speed*th.tcpa;
+      const cy = SNAP.wearer.pos[1] + Math.cos(wh)*SNAP.wearer.speed*th.tcpa;
+      const q = w2s([cx,cy]);
+      const pulse = 6 + 3*Math.sin(t*6);
+      ctx.strokeStyle = "#f87171"; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(q[0]-pulse,q[1]-pulse); ctx.lineTo(q[0]+pulse,q[1]+pulse);
+      ctx.moveTo(q[0]+pulse,q[1]-pulse); ctx.lineTo(q[0]-pulse,q[1]+pulse);
+      ctx.stroke();
+    }
+  }
+  requestAnimationFrame(draw);
+}
+load();
+</script>
+</body>
+</html>

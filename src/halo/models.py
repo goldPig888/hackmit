@@ -15,6 +15,7 @@ class Detection:
     confidence: float
     bbox: tuple[float, float, float, float]
     timestamp_s: float
+    reid: bool = False  # tracker holds an appearance embedding for this subject
 
     @property
     def center(self) -> tuple[float, float]:

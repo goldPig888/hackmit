@@ -37,8 +37,45 @@ const clsColor = c => CLS_COLORS[c] || "#22d3ee";
    the full console is visible without the phone backend. */
 const SCENARIO = new URLSearchParams(location.search).get("demo") || "car";
 
+// virtual rear-facing camera used to render the simulated feed in ?demo
+const SIM_CAM = { W: 640, H: 480, F: 300, CAMH: 1.3, HORIZON: 0.42 };
+const SIM_DIMS = { person: [0.5, 1.7], car: [0.8, 0.55], truck: [1.2, 1.4],
+                   bus: [1.2, 1.4], motorcycle: [0.6, 1.2], bicycle: [0.5, 1.1] };
+
+function simProject(wx, wy, yaw, pitch) {
+    const V = yaw + Math.PI;                       // rear camera looks backward
+    const depth = wx * Math.sin(V) + wy * Math.cos(V);
+    const lat = -(wx * Math.cos(V) - wy * Math.sin(V)); // mirrored: behind-left → left
+    if (depth < 0.4) return null;
+    const horizon = SIM_CAM.H * SIM_CAM.HORIZON + pitch * SIM_CAM.F;
+    const sx = SIM_CAM.W / 2 + (lat / depth) * SIM_CAM.F;
+    const feetY = horizon + (SIM_CAM.CAMH / depth) * SIM_CAM.F;
+    return { sx, feetY, depth, lat };
+}
+
 const Mock = {
     t0: performance.now() / 1000,
+    // world → 640x480 rear-camera image: fills bbox + pixel trails so the
+    // normal overlay pipeline renders on the simulated scene for free
+    project(tracks, yaw, pitch) {
+        for (const t of tracks) {
+            const p = simProject(t.position[0], t.position[1], yaw, pitch);
+            const dims = SIM_DIMS[t.cls] || [0.6, 0.9];
+            if (!p || Math.abs(p.lat / p.depth) > 1.6) { t.bbox = null; t.pixel_predicted = []; t.pixel_history = []; t.pixel_history_stab = []; continue; }
+            const wp = (dims[0] / p.depth) * SIM_CAM.F, hp = (dims[1] / p.depth) * SIM_CAM.F;
+            t.bbox = [p.sx - wp / 2, p.feetY - hp, wp, hp];
+            const mid = q => [q.sx, q.feetY - (dims[1] / q.depth) * SIM_CAM.F * 0.55];
+            t.pixel_predicted = (t.predicted_path || []).map(pt => {
+                const q = simProject(pt[0], pt[1], yaw, pitch);
+                return q && q.depth > 0.4 ? mid(q) : null;
+            });
+            t.pixel_history = (t.history || []).map(pt => {
+                const q = simProject(pt[0], pt[1], yaw, pitch);
+                return q && q.depth > 0.4 ? mid(q) : null;
+            });
+            t.pixel_history_stab = t.pixel_history;
+        }
+    },
     ambient(scene, n, t) {
         // background pedestrians milling — the "perceived but unattended" layer
         return Array.from({ length: n }, (_, i) => {
@@ -118,9 +155,74 @@ const Mock = {
             attention: 0.15, att_state: "OBSERVE", reasons: [],
         }];
 
-        // -------- scenario lab: ?demo=car|crowded|sparse|lunge|comove --------
+        // -------- scenario lab: ?demo=car|crowded|sparse|lunge|comove|closepass|conflict --------
         let density = "normal", environment = "outdoor";
-        if (SCENARIO === "crowded") {
+        if (SCENARIO === "closepass") {
+            // A: RC vehicle sweeps past VERY close behind-left but parallel —
+            // looks scary, predicted path is safe → tracks, never buzzes.
+            density = "sparse"; environment = "outdoor";
+            tracks.length = 0;
+            const ph = (t % 10) / 10;                 // 10s pass cycle
+            const cx = lerp(-6, -0.9, Math.min(ph * 1.6, 1));  // sweeps to 0.9m lateral
+            const cy = lerp(-14, 10, ph);             // behind → ahead, parallel
+            const near = Math.hypot(cx, cy) < 4;
+            tracks.push({
+                reid: true, id: "car-1", cls: "car", confidence: 0.9,
+                bbox: [200, 380, 140, 100],
+                position: [cx, cy], velocity: [0.05, 6.0], speed: 6.0,
+                bearing: Math.atan2(cx, cy), bearing_rate: 0.02,
+                bearing_rel: Math.atan2(cx, cy) - yaw, closing_rate: 0.1,
+                history: mkPath(cx, cy - 8, 0, 6),
+                predicted_times: Array.from({ length: 21 }, (_, i) => i * 0.2),
+                predicted_path: mkPath(cx, cy, 0.05, 6.0),
+                pixel_history: [], pixel_predicted: [], pixel_history_stab: [],
+                sigma: 0.4, ttc: null, tcpa: 2.4, dcpa: 0.9,
+                risk: near ? 0.18 : 0.08,             // close but SAFE — risk stays low
+                risk_level: "low", conflict_type: "safe_pass",
+                will_collide: false, conflict_point: null,
+                direction: "left", direction_label: near ? "LEFT" : "BEHIND LEFT",
+                factors: {}, expanding: near, area_rate: near ? 0.3 : 0.1, raw_px_rate: 60,
+                attention: near ? 0.45 : 0.2,
+                att_state: near ? "ATTEND" : "OBSERVE",
+                reasons: near ? ["close range (0.9 m)"] : [],
+                evidence: { proximity: near ? 0.9 : 0.4, trajectory_conflict: 0,
+                            rapid_approach: 0.05, heading_toward: 0.1 },
+            });
+        } else if (SCENARIO === "conflict") {
+            // B: vehicle still FAR away — but the wearer is turning into its
+            // path. HALO predicts the intersection before they're close.
+            density = "sparse"; environment = "outdoor";
+            tracks.length = 0;
+            const turning = Math.sin(t * 0.5) > 0.2;   // periodic left turn
+            const cx = -7, cy = -16;                    // 17m behind-left
+            tracks.push({
+                reid: true, id: "car-2", cls: "car", confidence: 0.87,
+                bbox: [160, 400, 90, 60],
+                position: [cx, cy], velocity: [0.5, 5.0], speed: 5.0,
+                bearing: Math.atan2(cx, cy), bearing_rate: -0.01,
+                bearing_rel: Math.atan2(cx, cy) - yaw, closing_rate: -1.2,
+                history: mkPath(cx, cy - 10, 0, 5),
+                predicted_times: Array.from({ length: 21 }, (_, i) => i * 0.2),
+                predicted_path: mkPath(cx, cy, 0.5, 5.0),
+                pixel_history: [], pixel_predicted: [], pixel_history_stab: [],
+                sigma: 0.5, ttc: 14, tcpa: 1.8, dcpa: turning ? 0.7 : 6.0,
+                risk: turning ? 0.82 : 0.25,
+                risk_level: turning ? "high" : "low",
+                conflict_type: turning ? "collision" : "safe_pass",
+                will_collide: turning,
+                conflict_point: turning ? [-2, -6] : null,
+                direction: "left", direction_label: "BEHIND LEFT",
+                factors: {}, expanding: false, area_rate: 0.05, raw_px_rate: 25,
+                attention: turning ? 0.9 : 0.35,
+                att_state: turning ? "WARN" : "ATTEND",
+                reasons: turning
+                    ? ["predicted paths overlap", "bearing stable", "rider turning"]
+                    : ["persistent approach"],
+                evidence: turning
+                    ? { trajectory_conflict: 1.0, heading_toward: 0.7, rapid_approach: 0.3, proximity: 0.2 }
+                    : { heading_toward: 0.6, persistence: 0.5, proximity: 0.15 },
+            });
+        } else if (SCENARIO === "crowded") {
             density = "crowded"; environment = "indoor";
             tracks.push(...this.ambient("crowded", 16, t));
         } else if (SCENARIO === "sparse" || SCENARIO === "comove") {
@@ -188,6 +290,8 @@ const Mock = {
         const watchCount = tracks.filter(x => x.att_state === "WARN" || x.att_state === "REFLEX").length;
         const threatCount = tracks.filter(x => x.att_state === "REFLEX" || x.will_collide).length;
 
+        this.project(tracks, yaw, 0.1);
+
         const prim = tracks.find(x => x.att_state === "REFLEX")
             || tracks.find(x => x.will_collide)
             || tracks.reduce((a, b) => (b.attention > (a?.attention ?? -1) ? b : a), null);
@@ -196,7 +300,7 @@ const Mock = {
         return {
             ready: true, timestamp: t,
             system: { fps: 10, camera: true, imu: true, tracking: tracks.length,
-                      haptic_endpoint: false, world_model: "STABLE", frame_size: [1280, 720] },
+                      haptic_endpoint: false, world_model: "STABLE", frame_size: [SIM_CAM.W, SIM_CAM.H] },
             camera_pose: { yaw, pitch: 0.1, roll: 0, confidence: 0.9 },
             scene: { density, environment,
                      people: tracks.filter(x => x.cls === "person").length,
@@ -321,6 +425,101 @@ function camRect(fw, fh) {
     return { x: (r.width - w) / 2, y: (r.height - h) / 2, w, h, sc };
 }
 
+// synthetic ego-view: perspective ground grid + track sprites, so ?demo
+// renders a plausible rear-camera feed instead of a black panel
+function drawSimScene(m, s, tracks) {
+    const toScr = p => [m.x + p[0] * m.sc, m.y + p[1] * m.sc];
+    const yaw = s.camera_pose.yaw, pitch = s.camera_pose.pitch;
+    const horizon = SIM_CAM.H * SIM_CAM.HORIZON + pitch * SIM_CAM.F;
+    const [hx0, hy] = toScr([0, horizon]);
+
+    cctx.save();
+    cctx.beginPath(); cctx.rect(m.x, m.y, m.w, m.h); cctx.clip();
+
+    // sky / ground
+    const sky = cctx.createLinearGradient(0, m.y, 0, hy);
+    sky.addColorStop(0, "#0d1319"); sky.addColorStop(1, "#080c10");
+    cctx.fillStyle = sky; cctx.fillRect(m.x, m.y, m.w, Math.max(0, hy - m.y));
+    const gnd = cctx.createLinearGradient(0, hy, 0, m.y + m.h);
+    gnd.addColorStop(0, "#0d1013"); gnd.addColorStop(1, "#060809");
+    cctx.fillStyle = gnd; cctx.fillRect(m.x, Math.max(m.y, hy), m.w, m.h - Math.max(0, hy - m.y));
+
+    // range rings on the ground plane
+    cctx.strokeStyle = "rgba(90,180,200,0.10)"; cctx.lineWidth = 1;
+    for (const d of [0.8, 1.2, 2, 3, 4, 5, 7, 10, 14, 20, 30]) {
+        const y = horizon + (SIM_CAM.CAMH / d) * SIM_CAM.F;
+        if (y < horizon + 2 || y > SIM_CAM.H + 20) continue;
+        const [lx, ly] = toScr([0, y]);
+        cctx.beginPath(); cctx.moveTo(m.x, ly); cctx.lineTo(m.x + m.w, ly); cctx.stroke();
+        if ([1, 2, 5, 10, 20].includes(d)) {
+            cctx.fillStyle = "rgba(90,180,200,0.28)"; cctx.font = "8px monospace";
+            cctx.fillText(`${d}m`, m.x + 4, ly - 2);
+        }
+    }
+    // radial lanes converging on the wearer
+    for (const lat of [-8, -6, -4, -2, 0, 2, 4, 6, 8]) {
+        const near = SIM_CAM.W / 2 + (lat / 0.6) * SIM_CAM.F;
+        const far = SIM_CAM.W / 2 + (lat / 30) * SIM_CAM.F;
+        const [ax, ay] = toScr([near, horizon + (SIM_CAM.CAMH / 0.6) * SIM_CAM.F]);
+        const [bx, by] = toScr([far, horizon + (SIM_CAM.CAMH / 30) * SIM_CAM.F]);
+        cctx.beginPath(); cctx.moveTo(ax, ay); cctx.lineTo(bx, by); cctx.stroke();
+    }
+    // horizon glow
+    cctx.strokeStyle = "rgba(34,211,238,0.25)"; cctx.lineWidth = 1.5;
+    cctx.beginPath(); cctx.moveTo(m.x, hy); cctx.lineTo(m.x + m.w, hy); cctx.stroke();
+
+    // sprites, far → near (painter's order)
+    const visible = tracks.filter(t => t.bbox)
+        .map(t => ({ t, p: simProject(t.position[0], t.position[1], yaw, pitch) }))
+        .filter(o => o.p).sort((a, b) => b.p.depth - a.p.depth);
+    for (const { t, p } of visible) {
+        const [bx, by] = toScr([t.bbox[0], t.bbox[1]]);
+        const bw = t.bbox[2] * m.sc, bh = t.bbox[3] * m.sc;
+        const col = clsColor(t.cls);
+        // ground shadow
+        const [fx, fy] = toScr([p.sx, p.feetY]);
+        cctx.fillStyle = "rgba(0,0,0,0.5)";
+        cctx.beginPath(); cctx.ellipse(fx, fy, bw * 0.55, bw * 0.14, 0, 0, Math.PI * 2); cctx.fill();
+
+        if (t.cls === "person") {
+            // capsule body + head
+            cctx.fillStyle = "rgba(24,32,42,0.95)";
+            cctx.strokeStyle = col; cctx.lineWidth = 1;
+            cctx.beginPath();
+            cctx.roundRect(bx + bw * 0.15, by + bh * 0.18, bw * 0.7, bh * 0.82, bw * 0.3);
+            cctx.fill(); cctx.stroke();
+            cctx.beginPath();
+            cctx.arc(bx + bw / 2, by + bh * 0.11, Math.max(2, bw * 0.16), 0, Math.PI * 2);
+            cctx.fill(); cctx.stroke();
+        } else {
+            // vehicle: body + cabin + wheels + headlights (facing camera)
+            cctx.fillStyle = "rgba(26,34,44,0.97)";
+            cctx.strokeStyle = col; cctx.lineWidth = 1;
+            cctx.beginPath();
+            cctx.roundRect(bx, by + bh * 0.35, bw, bh * 0.55, bw * 0.12);
+            cctx.fill(); cctx.stroke();
+            cctx.beginPath();
+            cctx.roundRect(bx + bw * 0.18, by + bh * 0.08, bw * 0.64, bh * 0.34, bw * 0.08);
+            cctx.fill(); cctx.stroke();
+            cctx.fillStyle = "#05070a";
+            cctx.beginPath(); cctx.ellipse(bx + bw * 0.16, by + bh * 0.9, bw * 0.13, bh * 0.1, 0, 0, Math.PI * 2); cctx.fill();
+            cctx.beginPath(); cctx.ellipse(bx + bw * 0.84, by + bh * 0.9, bw * 0.13, bh * 0.1, 0, 0, Math.PI * 2); cctx.fill();
+            // headlight glow
+            cctx.fillStyle = "rgba(255,220,140,0.85)";
+            for (const lx of [bx + bw * 0.2, bx + bw * 0.8]) {
+                cctx.beginPath(); cctx.arc(lx, by + bh * 0.55, Math.max(1.5, bw * 0.05), 0, Math.PI * 2); cctx.fill();
+            }
+        }
+    }
+
+    // vignette
+    const vg = cctx.createRadialGradient(m.x + m.w / 2, m.y + m.h / 2, m.h * 0.35,
+                                         m.x + m.w / 2, m.y + m.h / 2, m.w * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.45)");
+    cctx.fillStyle = vg; cctx.fillRect(m.x, m.y, m.w, m.h);
+    cctx.restore();
+}
+
 function drawCamera(s, tracks) {
     const r = camWrap.getBoundingClientRect();
     // Keep canvas backing pixels aligned with its CSS box on Retina displays.
@@ -337,13 +536,16 @@ function drawCamera(s, tracks) {
 
     const m = camRect(fw, fh);
     if (camBmp) cctx.drawImage(camBmp, m.x, m.y, m.w, m.h);
+    else if (DEMO) drawSimScene(m, s, tracks);
     const toScr = p => [m.x + p[0] * m.sc, m.y + p[1] * m.sc];
     const now = performance.now() / 1000;
 
     for (const t of tracks) {
         const primary = t.id === s.primary_threat_id || t.att_state === "REFLEX";
         const linked = t.id === S.linked;
-        const col = primary ? riskColor(t.att_state === "REFLEX" ? 1 : t.risk) : (linked ? "rgba(34,211,238,1)" : "rgba(74,90,110,0.9)");
+        const col = primary ? riskColor(t.att_state === "REFLEX" ? 1 : t.risk)
+            : (linked ? "rgba(34,211,238,1)"
+            : (t.reid ? "rgba(244,114,182,0.95)" : "rgba(74,90,110,0.9)"));
 
         // trails
         const trail = (S.stab ? t.pixel_history_stab : t.pixel_history) || [];
@@ -400,9 +602,9 @@ function drawCamera(s, tracks) {
             const bw = t.bbox[2] * m.sc, bh = t.bbox[3] * m.sc;
             cctx.strokeStyle = col; cctx.lineWidth = primary ? 4 : (linked ? 2.5 : 1.5);
             cctx.strokeRect(bx, by, bw, bh);
-            if (primary || linked) {
+            if (primary || linked || t.reid) {
                 cctx.fillStyle = col; cctx.font = "bold 14px monospace";
-                const label = `${t.cls.toUpperCase()} #${t.id.split("-").pop()}${primary ? " ⚠" : ""}`;
+                const label = `${t.cls.toUpperCase()} #${t.id.split("-").pop()}${primary ? " ⚠" : ""}${t.reid ? " ·REID" : ""}`;
                 cctx.fillText(label, bx, by - 6);
             }
             if (t.closing_rate < -0.3) {
@@ -422,6 +624,13 @@ function drawCamera(s, tracks) {
 /* ---------------- world view ---------------- */
 const wCv = $("worldCanvas"), wctx = wCv.getContext("2d");
 
+// scroll = zoom into the wearer, double-click = reset to auto-range
+wCv.addEventListener("wheel", e => {
+    e.preventDefault();
+    S.worldZoom = clamp((S.worldZoom || 1) * (e.deltaY < 0 ? 1.15 : 1 / 1.15), 0.25, 10);
+}, { passive: false });
+wCv.addEventListener("dblclick", () => { S.worldZoom = 1; });
+
 function drawWorld(s, tracks) {
     const r = wCv.getBoundingClientRect();
     wCv.width = r.width * devicePixelRatio; wCv.height = r.height * devicePixelRatio;
@@ -437,10 +646,13 @@ function drawWorld(s, tracks) {
         maxD = Math.max(maxD, Math.hypot(...t.position));
         for (const p of t.predicted_path || []) maxD = Math.max(maxD, Math.hypot(p[0], p[1]));
     }
-    const target = clamp(maxD * 1.25, 12, 60);
+    // user zoom on top of auto-range: zoom>1 shrinks the visible range so
+    // close-in detail (the strike range) fills the panel
+    const target = clamp(maxD * 1.25 / (S.worldZoom || 1), 2, 60);
     S.worldScale = lerp(S.worldScale, target, 0.08);
     const scale = (Math.min(r.width, r.height) * 0.42) / S.worldScale;
-    $("worldScale").textContent = `range ${S.worldScale.toFixed(0)} m`;
+    $("worldScale").textContent = `range ${S.worldScale.toFixed(0)} m` +
+        ((S.worldZoom || 1) !== 1 ? ` · zoom ${S.worldZoom.toFixed(1)}×` : "");
 
     const w2s = p => {
         const d = Math.hypot(p[0], p[1]);
@@ -453,7 +665,8 @@ function drawWorld(s, tracks) {
     const step = 5 * scale;
     for (let x = egoX % step; x < r.width; x += step) { wctx.beginPath(); wctx.moveTo(x, 0); wctx.lineTo(x, r.height); wctx.stroke(); }
     for (let y = egoY % step; y < r.height; y += step) { wctx.beginPath(); wctx.moveTo(0, y); wctx.lineTo(r.width, y); wctx.stroke(); }
-    for (let ring = 5; ring <= S.worldScale; ring += 5) {
+    const ringStep = S.worldScale <= 6 ? 1 : S.worldScale <= 15 ? 2 : 5;
+    for (let ring = ringStep; ring <= S.worldScale; ring += ringStep) {
         wctx.strokeStyle = "rgba(34,60,80,0.7)";
         wctx.beginPath(); wctx.arc(egoX, egoY, ring * scale, 0, Math.PI * 2); wctx.stroke();
         wctx.fillStyle = "rgba(74,90,110,0.8)"; wctx.font = "9px monospace";
@@ -589,6 +802,10 @@ function drawWorld(s, tracks) {
             wctx.strokeStyle = primary ? riskColor(t.risk, 0.5 * pulse + 0.3) : "rgba(34,211,238,0.8)";
             wctx.lineWidth = 2;
             wctx.beginPath(); wctx.arc(sx, sy, rad + 5 + 3 * pulse, 0, Math.PI * 2); wctx.stroke();
+        } else if (t.reid) {
+            wctx.strokeStyle = "rgba(244,114,182,0.9)";
+            wctx.lineWidth = 1.5;
+            wctx.beginPath(); wctx.arc(sx, sy, rad + 4, 0, Math.PI * 2); wctx.stroke();
         }
         // velocity vector
         wctx.strokeStyle = hexA(clsColor(t.cls), 0.9); wctx.lineWidth = 1.5;
@@ -596,7 +813,7 @@ function drawWorld(s, tracks) {
         const vEnd = w2s([t.position[0] + t.velocity[0], t.position[1] + t.velocity[1]]);
         wctx.lineTo(...vEnd); wctx.stroke();
         // label
-        wctx.fillStyle = primary ? "#fff" : "rgba(200,214,229,0.85)";
+        wctx.fillStyle = primary ? "#fff" : (t.reid ? "rgba(244,114,182,0.95)" : "rgba(200,214,229,0.85)");
         wctx.font = (primary ? "bold " : "") + "10px monospace";
         wctx.fillText(`${t.cls.toUpperCase()} #${t.id.split("-").pop()}`, sx + rad + 4, sy + 3);
         t._whit = [sx, sy];
@@ -761,6 +978,18 @@ function updateDom(s, tracks) {
         $("thSec").textContent = "—";
     }
 
+    // episodic memory: persistent-follower alerts surface here regardless of
+    // whether the follower is currently the primary threat
+    const followers = (s.memory && s.memory.followers) || [];
+    const fol = followers[0];
+    $("thMemRow").style.display = fol ? "" : "none";
+    $("thMemNote").style.display = fol ? "" : "none";
+    if (fol) {
+        $("thMem").textContent = `FOLLOWER? ${fol.id} · ${(fol.comove_s / 60).toFixed(1)} min`;
+        $("thMemNote").textContent = fol.narration
+            || `${fol.reappears} reappearance(s) · closest ${fol.min_dist}m`;
+    }
+
     // This card deliberately sits on top of the camera, independent of whether
     // a world point can be reprojected into pixel coordinates.
     const alert = $("cameraAlert");
@@ -872,6 +1101,24 @@ wCv.addEventListener("mousemove", e => {
     S.linked = null;
     for (const t of s.tracks || []) {
         if (t._whit && Math.hypot(mx - t._whit[0], my - t._whit[1]) < 22) S.linked = t.id;
+    }
+});
+
+// panel expand: ⤢ button toggles, Esc closes
+document.querySelectorAll(".expand-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+        const p = $(btn.dataset.panel);
+        const was = p.classList.contains("expanded");
+        document.querySelectorAll("section.expanded").forEach(x => x.classList.remove("expanded"));
+        if (!was) p.classList.add("expanded");
+        document.body.classList.toggle("has-expanded",
+            Boolean(document.querySelector("section.expanded")));
+    });
+});
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+        document.querySelectorAll("section.expanded").forEach(x => x.classList.remove("expanded"));
+        document.body.classList.remove("has-expanded");
     }
 });
 

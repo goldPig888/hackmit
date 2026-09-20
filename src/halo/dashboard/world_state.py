@@ -16,6 +16,7 @@ from typing import Optional
 import numpy as np
 
 from ..attention import ATTEND, REFLEX, WARN, build_context, score_track
+from ..follow_memory import FollowMemory
 
 _INTENSITY = {"weak": 0.35, "medium": 0.65, "strong": 1.0}
 _GHOST_TIMES = (0.5, 1.0, 1.5, 2.0)
@@ -65,6 +66,7 @@ class WorldStateBuilder:
         self._was_turning = False
         self._haptic = {"left": 0.0, "right": 0.0, "center": 0.0,
                         "direction": None, "intensity": None, "ts": 0.0}
+        self._follow = FollowMemory()
 
     # ---- inputs from the processing loop ----
 
@@ -93,6 +95,7 @@ class WorldStateBuilder:
         self._was_turning = False
         self._haptic = {"left": 0.0, "right": 0.0, "center": 0.0,
                         "direction": None, "intensity": None, "ts": 0.0}
+        self._follow.reset()
 
     def _emit(self, etype: str, ts: float, label: str,
               object_id: Optional[str] = None, risk: Optional[float] = None) -> None:
@@ -128,6 +131,7 @@ class WorldStateBuilder:
         ego = pipeline.ego_tracker.get_current_state()
         objects = pipeline.get_all_object_states()
         bbox_by_id = {d.object_id: list(d.bbox) for d in detections}
+        reid_by_id = {d.object_id: getattr(d, "reid", False) for d in detections}
         risk_by_id = {}
         for a in pipeline.get_risk_assessments():
             if a.object_id not in risk_by_id or a.probability > risk_by_id[a.object_id].probability:
@@ -325,7 +329,7 @@ class WorldStateBuilder:
 
             tracks.append({
                 "id": oid, "cls": obj.label, "confidence": float(obj.confidence),
-                "bbox": bbox,
+                "bbox": bbox, "reid": bool(reid_by_id.get(oid, False)),
                 "position": [float(pos[0]), float(pos[1])],
                 "velocity": [float(vel[0]), float(vel[1])], "speed": speed,
                 "bearing": float(obj.bearing), "bearing_rate": bearing_rate,
@@ -425,6 +429,14 @@ class WorldStateBuilder:
                 ],
             }
 
+        # --- episodic memory: persistent followers across the session ---
+        followers = self._follow.update(tracks, float(ego.speed), ts_s)
+        for f in followers:
+            if f["fresh"]:
+                self._emit("POSSIBLE FOLLOWER", ts_s,
+                           f'{f["id"]} · co-moving {f["comove_s"]:.0f}s',
+                           f["id"], 0.6)
+
         return {
             "ready": True,
             "timestamp": float(ts_s),
@@ -459,6 +471,7 @@ class WorldStateBuilder:
             "counterfactual": counterfactual,
             "funnel": funnel,
             "events": list(self._events)[-40:],
+            "memory": {"followers": followers},
             "risk_history": [[t, r] for t, r in self._risk_hist],
             "horizon_s": self.horizon_s,
         }

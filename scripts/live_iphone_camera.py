@@ -13,6 +13,7 @@ Dashboard (also shows annotated video at /video):
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -62,6 +63,8 @@ class IPhoneHaloProcessor:
             tracker_config=str(tracker_cfg) if tracker_cfg.exists() else "bytetrack.yaml")
         self.haptics = HapticPublisher(output_dir)
         self.pose_strike = PoseStrike() if os.environ.get("HALO_POSE", "1") != "0" else None
+        self._record = os.environ.get("HALO_RECORD", "1") != "0"
+        self._run_file = None
 
         self.hfov_deg = hfov_deg
         self._intrinsics_set = False
@@ -72,6 +75,34 @@ class IPhoneHaloProcessor:
         self._last_status_push = 0.0
         self._last_cleanup = 0.0
         self._clear_requested = threading.Event()
+
+    def _record_frame(self, state: dict, ts_s: float) -> None:
+        """Append compact per-frame features to runs/run_*.jsonl for /training replay."""
+        if not self._record or not state.get("tracks"):
+            return
+        try:
+            if self._run_file is None:
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+                self._run_file = self.output_dir / f"run_{int(time.time())}.jsonl"
+            rec = {
+                "t": float(ts_s),
+                "context": {"density": state.get("scene", {}).get("density"),
+                            "environment": state.get("scene", {}).get("environment")},
+                "tracks": [{
+                    "id": tr["id"], "position": tr["position"],
+                    "closing_rate": tr["closing_rate"],
+                    "bearing_rate": tr["bearing_rate"],
+                    "area_rate": tr.get("area_rate", 0.0),
+                    "tcpa": tr["tcpa"], "dcpa": tr["dcpa"],
+                    "will_collide": tr["will_collide"],
+                    "evidence": tr.get("evidence", {}),
+                    "halo_action": tr["att_state"] if tr["att_state"] != "REFLEX" else "WARN",
+                } for tr in state["tracks"]],
+            }
+            with self._run_file.open("a") as f:
+                f.write(json.dumps(rec) + "\n")
+        except Exception:
+            pass
 
     def request_clear_subjects(self) -> None:
         """Schedule a reset; the CV thread performs it between frames."""
@@ -144,6 +175,7 @@ class IPhoneHaloProcessor:
             strike_evidence=strike_ev,
         )
         self.server.set_world_state(state)
+        self._record_frame(state, ts_s)
 
         # Reflex path: immediate-motion threats bypass risk gating entirely —
         # strong directional haptic on every reflex frame.
