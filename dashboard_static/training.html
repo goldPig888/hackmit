@@ -52,6 +52,13 @@ th { color: var(--dim); font-weight: 400; letter-spacing: 1px; font-size: 10px; 
 .reward-legend b { float: right; }
 .note { color: var(--dim); font-size: 10px; margin-top: 8px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.ep-tick { font-size: 10px; color: var(--dim); margin-top: 6px; max-height: 64px;
+           overflow: hidden; }
+.ep-tick div { padding: 1px 0; white-space: nowrap; }
+.ep-tick div:first-child { color: var(--txt); }
+.ep-tick .gain { color: var(--green); } .ep-tick .loss { color: var(--red); }
+@keyframes epflash { 0% { color: var(--cyan); } 100% { color: var(--txt); } }
+.ep-tick div:first-child { animation: epflash .6s ease-out; }
 </style>
 </head>
 <body>
@@ -76,6 +83,7 @@ th { color: var(--dim); font-weight: 400; letter-spacing: 1px; font-size: 10px; 
             <div class="kv"><span>ground truth</span><b class="act" id="epLabel">—</b></div>
             <div class="kv"><span>policy action</span><b class="act" id="epAction">—</b></div>
             <div class="kv"><span>reward</span><b id="epReward">—</b></div>
+            <div id="epTick" class="ep-tick"></div>
             <hr style="border-color:var(--edge);margin:8px 0">
             <div class="sec-label">POLICY π(a|s)</div>
             <div id="probBars"></div>
@@ -153,6 +161,7 @@ const $ = id => document.getElementById(id);
 const epC = $("epCanvas"), epX = epC.getContext("2d");
 const cuC = $("curveCanvas"), cuX = cuC.getContext("2d");
 let frameIdx = 0;
+let _lastEp = -1;
 
 async function post(path, body) {
     await fetch("/api/training/" + path, { method: "POST",
@@ -280,6 +289,17 @@ async function poll() {
         $("stPill").textContent = st.training ? "● PPO TRAINING" : "IDLE";
         $("stPill").className = "pill" + (st.training ? " on" : "");
         $("epNo").textContent = st.episode_no;
+        // live episode ticker — each completed batch logs a line
+        if (st.episode_no !== _lastEp && st.last_batch) {
+            _lastEp = st.episode_no;
+            const r = st.last_batch.mean_reward;
+            const line = document.createElement("div");
+            line.innerHTML = `EP ${st.episode_no - st.last_batch.episodes + 1}→${st.episode_no} · ` +
+                `${(st.scenario || "?").replace(/_/g, " ")} · ` +
+                `<span class="${r >= 0 ? "gain" : "loss"}">${r >= 0 ? "+" : ""}${r}</span>`;
+            $("epTick").prepend(line);
+            while ($("epTick").children.length > 6) $("epTick").lastChild.remove();
+        }
         $("epScenario").textContent = st.scenario || "—";
         $("epContext").textContent = (st.context || "—").replace("_", " · ").toUpperCase();
         $("mEp").textContent = st.episode_no;

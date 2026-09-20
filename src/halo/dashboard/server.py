@@ -14,6 +14,16 @@ from .data_streamer import DataStreamer, DetectionEvent, HazardEvent, SystemStat
 from .phone_receiver import PhoneStreamReceiver
 
 
+@web.middleware
+async def no_cache_dashboard_assets(request: Request, handler):
+    """Keep the live console's HTML/CSS/JS in sync while it is being iterated."""
+    response = await handler(request)
+    if request.path == "/demo" or request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 class DashboardServer:
     """Live dashboard server for HALO monitoring."""
 
@@ -28,7 +38,7 @@ class DashboardServer:
         self.data_streamer = data_streamer
         self.host = host
         self.port = port
-        self.app: Application = web.Application()
+        self.app: Application = web.Application(middlewares=[no_cache_dashboard_assets])
         self._setup_routes()
         self.websocket_clients: set[WebSocketResponse] = set()
         self.phone_receiver = PhoneStreamReceiver()

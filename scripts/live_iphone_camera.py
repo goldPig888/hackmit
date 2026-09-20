@@ -283,26 +283,31 @@ class IPhoneHaloProcessor:
             featured_det, featured_risk = max(assessments, key=lambda pair: pair[1].risk)
         elif detections:
             featured_det = max(detections, key=lambda item: item.confidence)
-        if featured_det is not None:
-            risk_value = float(featured_risk.risk) if featured_risk else 0.0
-            is_conflict = risk_value >= 0.30
-            is_high = risk_value >= 0.70
+        # Keep this card visible even when the detector has no boxes. A stable
+        # "SCANNING" state makes an empty scene readable instead of making the
+        # overlay appear to collapse or fail.
+        risk_value = float(featured_risk.risk) if featured_risk else 0.0
+        is_conflict = risk_value >= 0.30
+        is_high = risk_value >= 0.70
+        if featured_det is None:
+            accent, title, label, direction = (0, 220, 160), "SCANNING", "NO SUBJECTS", "LIVE FEED"
+        else:
             accent = (0, 0, 235) if is_high else ((0, 185, 255) if is_conflict else (255, 220, 0))
             title = "PREDICTED CONFLICT" if is_conflict else "TRACKING"
-            direction = featured_risk.direction.upper() if featured_risk else "PATH ACTIVE"
-            card_w = min(frame.shape[1] - 24, max(360, int(frame.shape[1] * 0.52)))
-            card_h = min(frame.shape[0] - 40, max(108, int(frame.shape[0] * 0.18)))
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (12, 38), (12 + card_w, 38 + card_h), (10, 12, 18), -1)
-            cv2.addWeighted(overlay, 0.84, frame, 0.16, 0, frame)
-            cv2.rectangle(frame, (12, 38), (12 + card_w, 38 + card_h), accent, 3)
-            cv2.putText(frame, title, (28, 72), cv2.FONT_HERSHEY_DUPLEX, 0.78, accent, 2)
             label = featured_det.label.upper()
-            cv2.putText(frame, f"{label}  {direction}  {risk_value:.0%}", (28, 108),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.72, (245, 245, 245), 2)
-            if featured_risk and featured_risk.cpa_result.time_to_cpa is not None:
-                cv2.putText(frame, f"CPA {featured_risk.cpa_result.time_to_cpa:.1f}s", (28, 137),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.60, accent, 2)
+            direction = featured_risk.direction.upper() if featured_risk else "PATH ACTIVE"
+        card_w = min(frame.shape[1] - 24, max(360, int(frame.shape[1] * 0.52)))
+        card_h = min(frame.shape[0] - 40, max(108, int(frame.shape[0] * 0.18)))
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (12, 38), (12 + card_w, 38 + card_h), (10, 12, 18), -1)
+        cv2.addWeighted(overlay, 0.84, frame, 0.16, 0, frame)
+        cv2.rectangle(frame, (12, 38), (12 + card_w, 38 + card_h), accent, 3)
+        cv2.putText(frame, title, (28, 72), cv2.FONT_HERSHEY_DUPLEX, 0.78, accent, 2)
+        cv2.putText(frame, f"{label}  {direction}" + (f"  {risk_value:.0%}" if featured_det else ""), (28, 108),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.72, (245, 245, 245), 2)
+        if featured_risk and featured_risk.cpa_result.time_to_cpa is not None:
+            cv2.putText(frame, f"CPA {featured_risk.cpa_result.time_to_cpa:.1f}s", (28, 137),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.60, accent, 2)
 
         ok, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         if ok:

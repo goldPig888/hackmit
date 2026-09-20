@@ -19,6 +19,12 @@ from ..attention import ATTEND, REFLEX, WARN, build_context, score_track
 from ..follow_memory import FollowMemory
 
 _INTENSITY = {"weak": 0.35, "medium": 0.65, "strong": 1.0}
+
+# hand-held COCO objects we associate to a carrying person. Sharp ones
+# escalate attention; blunt ones are labeled for context only.
+_SHARP_OBJECTS = ("scissors", "knife")
+_HELD_OBJECTS = _SHARP_OBJECTS + (
+    "baseball bat", "tennis racket", "bottle", "umbrella")
 _GHOST_TIMES = (0.5, 1.0, 1.5, 2.0)
 
 
@@ -63,6 +69,7 @@ class WorldStateBuilder:
         self._conflict: dict[str, bool] = {}
         self._cpa_flagged: dict[str, bool] = {}
         self._reflex: dict[str, bool] = {}
+        self._held: dict[str, bool] = {}
         self._was_turning = False
         self._haptic = {"left": 0.0, "right": 0.0, "center": 0.0,
                         "direction": None, "intensity": None, "ts": 0.0}
@@ -92,6 +99,7 @@ class WorldStateBuilder:
         self._conflict.clear()
         self._cpa_flagged.clear()
         self._reflex.clear()
+        self._held.clear()
         self._was_turning = False
         self._haptic = {"left": 0.0, "right": 0.0, "center": 0.0,
                         "direction": None, "intensity": None, "ts": 0.0}
@@ -132,6 +140,25 @@ class WorldStateBuilder:
         objects = pipeline.get_all_object_states()
         bbox_by_id = {d.object_id: list(d.bbox) for d in detections}
         reid_by_id = {d.object_id: getattr(d, "reid", False) for d in detections}
+        # Hand-held objects: associate a handheld-object detection with the
+        # person whose box contains its center. Observable co-location only.
+        # Sharp items escalate attention + log an event; blunt ones (bat,
+        # bottle, umbrella) are labeled but never warn on their own — the
+        # strike/reflex channel covers a swung object regardless.
+        held_by: dict[str, str] = {}
+        sharp_by: dict[str, str] = {}
+        for d in detections:
+            if d.label not in _HELD_OBJECTS:
+                continue
+            scx, scy = d.bbox[0] + d.bbox[2] / 2, d.bbox[1] + d.bbox[3] / 2
+            for p in detections:
+                if p.label == "person" and (
+                        p.bbox[0] <= scx <= p.bbox[0] + p.bbox[2]
+                        and p.bbox[1] <= scy <= p.bbox[1] + p.bbox[3]):
+                    held_by[p.object_id] = d.label
+                    if d.label in _SHARP_OBJECTS:
+                        sharp_by[p.object_id] = d.label
+                    break
         risk_by_id = {}
         for a in pipeline.get_risk_assessments():
             if a.object_id not in risk_by_id or a.probability > risk_by_id[a.object_id].probability:
@@ -317,7 +344,8 @@ class WorldStateBuilder:
                 raw_px_rate=raw_px_rate or 0.0,
                 ttc=ttc, will_collide=will_collide, label=obj.label,
                 density=density, environment=environment,
-                ego_moving=ego_moving)
+                ego_moving=ego_moving,
+                held_object=oid in sharp_by)
             funnel["attended"] += att.state in (ATTEND, WARN, REFLEX)
             funnel["watch"] += att.state in (WARN, REFLEX)
             funnel["threat"] += att.state == REFLEX or will_collide
@@ -326,10 +354,15 @@ class WorldStateBuilder:
                            att.reasons[0] if att.reasons else "rapid motion",
                            oid, 1.0)
             self._reflex[oid] = att.state == REFLEX
+            if oid in sharp_by and not self._held.get(oid):
+                self._emit("SHARP OBJECT", ts_s,
+                           f"{sharp_by[oid]} held by {obj.label}", oid)
+            self._held[oid] = oid in sharp_by
 
             tracks.append({
                 "id": oid, "cls": obj.label, "confidence": float(obj.confidence),
                 "bbox": bbox, "reid": bool(reid_by_id.get(oid, False)),
+                "held_object": held_by.get(oid),
                 "position": [float(pos[0]), float(pos[1])],
                 "velocity": [float(vel[0]), float(vel[1])], "speed": speed,
                 "bearing": float(obj.bearing), "bearing_rate": bearing_rate,
@@ -406,6 +439,7 @@ class WorldStateBuilder:
         if primary is not None:
             threat = {
                 "id": primary["id"], "cls": primary["cls"],
+                "held_object": primary["held_object"],
                 "direction_label": primary["direction_label"],
                 "risk": primary["risk"], "ttc": primary["ttc"],
                 "tcpa": primary["tcpa"], "dcpa": primary["dcpa"],

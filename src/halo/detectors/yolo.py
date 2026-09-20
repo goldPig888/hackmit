@@ -34,7 +34,10 @@ class YOLODetector(BaseDetector):
         self.model = YOLO(model_path)
         self.tracker_config = tracker_config
         self.allowed_classes = allowed_classes or {
-            "car", "truck", "bus", "motorcycle", "bicycle", "person"
+            "car", "truck", "bus", "motorcycle", "bicycle", "person",
+            # hand-held objects worth flagging when carried by a person
+            "scissors", "knife", "baseball bat", "tennis racket",
+            "bottle", "umbrella",
         }
         self._supported_classes = set(self.model.names.values())
         # Prefer Apple-Silicon GPU; ~2x faster than CPU for n-class models.

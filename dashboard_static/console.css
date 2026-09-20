@@ -1,3 +1,5 @@
+html { height: 100%; }
+html, body { margin: 0; min-height: 0; }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
@@ -17,15 +19,22 @@ body {
     background: var(--bg);
     color: var(--txt);
     font-family: var(--mono);
+    /* 100vh is the fallback for Safari versions/embedded views that do not
+       resolve dvh. Without it the 1fr dashboard stage shrinks to its ~40px
+       header, which makes the camera canvas look like a horizontal line. */
     height: 100vh;
+    height: 100dvh;
+    min-height: 432px;
     display: grid;
-    grid-template-rows: 30px 1fr 44px;
+    /* Header and temporal log cannot grow and steal the camera/world area. */
+    grid-template-rows: 34px minmax(320px, 1fr) 78px;
     overflow: hidden;
 }
 
 /* ---------- top bar ---------- */
 #topbar {
     display: flex; align-items: center; gap: 10px;
+    min-height: 0; height: 34px; overflow: hidden;
     padding: 0 10px; border-bottom: 1px solid var(--edge);
     background: linear-gradient(180deg, #0b1220, #070b14);
 }
@@ -54,9 +63,15 @@ main {
     /* Each grid item may shrink, but the diagnostic rail always has enough
        room for its labels. Contain overflow so it cannot paint over a view. */
     grid-template-columns: minmax(0, 43fr) minmax(0, 49fr) minmax(168px, 12fr);
-    gap: 1px; background: var(--edge); min-height: 0; overflow: hidden;
+    gap: 1px; background: var(--edge); height: 100%; min-height: 320px; overflow: hidden;
+    align-items: stretch;
 }
 section, aside { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+/* Explicit grid rows keep the visual stage allocated even before a camera
+   frame, track label, or world-state snapshot has arrived. */
+#camPanel, #worldPanel { height: 100%; min-height: 0; display: grid; }
+#camPanel { grid-template-rows: auto minmax(0, 1fr) auto; }
+#worldPanel { grid-template-rows: auto minmax(0, 1fr) auto; }
 
 .panel-head {
     display: flex; align-items: center; gap: 10px;
@@ -96,9 +111,13 @@ body.has-expanded main > section:not(.expanded),
 body.has-expanded main > aside { visibility: hidden; pointer-events: none; }
 
 /* ---------- camera panel ---------- */
-.cam-wrap { position: relative; flex: 1 1 400px; min-height: 400px; background: #000; overflow: hidden; }
+.cam-wrap {
+    position: relative; flex: 1 1 0; min-width: 0; min-height: 0;
+    width: 100%; height: 100%; align-self: stretch;
+    background: #000; overflow: hidden;
+}
 
-#camOverlay { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; cursor: crosshair; }
+#camOverlay { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; cursor: crosshair; }
 .camera-alert {
     position: absolute; z-index: 2; top: 12px; left: 12px; max-width: calc(100% - 24px);
     padding: 9px 12px 10px; border: 2px solid var(--amber); border-left-width: 7px;
@@ -135,8 +154,11 @@ body.has-expanded main > aside { visibility: hidden; pointer-events: none; }
 .f-arrow { color: var(--dim); }
 
 /* ---------- world panel ---------- */
-#worldPanel { position: relative; min-height: 460px; }
-#worldCanvas { display: block; flex: 1 1 400px; min-height: 400px; width: 100%; cursor: crosshair; }
+#worldPanel { position: relative; }
+#worldCanvas {
+    display: block; min-width: 0; min-height: 0;
+    width: 100%; height: 100%; cursor: crosshair;
+}
 
 #clearSubjects {
     flex: 0 0 auto; background: #0b1220; color: var(--cyan); border: 1px solid var(--edge);
@@ -200,8 +222,13 @@ body.has-expanded main > aside { visibility: hidden; pointer-events: none; }
 #dgRaw { background: var(--dim); } #dgCam { background: var(--amber); } #dgStab { background: var(--green); }
 
 /* ---------- timeline ---------- */
-#timelinePanel { display: grid; grid-template-columns: 1fr 210px; grid-template-rows: auto 1fr; background: var(--panel); border-top: 1px solid var(--edge); }
-#timelinePanel .panel-head { grid-column: 1 / -1; padding: 3px 12px; }
+#timelinePanel {
+    display: grid; grid-template-columns: minmax(0, 1fr) 210px;
+    grid-template-rows: 20px minmax(0, 1fr);
+    min-height: 0; height: 100%; overflow: hidden;
+    background: var(--panel); border-top: 1px solid var(--edge);
+}
+#timelinePanel .panel-head { grid-column: 1 / -1; min-height: 0; padding: 2px 12px; font-size: 8px; }
 
 /* ---------- reflex mode ---------- */
 body.reflex { box-shadow: inset 0 0 140px rgba(244,63,94,.45); }
@@ -209,9 +236,21 @@ body.reflex #topbar { background: linear-gradient(180deg, #2a0a12, #14060a); }
 body.reflex .live-dot { background: var(--red); box-shadow: 0 0 10px var(--red); animation: blink .5s infinite; }
 .camera-alert.reflex { border-color: var(--red); box-shadow: 0 0 34px rgba(244,63,94,.7); }
 .camera-alert.reflex .camera-alert-title { color: var(--red); animation: blink .6s infinite; }
-#timelineCanvas { width: 100%; height: 100%; min-height: 0; }
+
+/* one-shot screen-edge flash on reflex onset — instantaneous, unlike
+   attention which accumulates */
+#reflexFlash { position: fixed; inset: 0; pointer-events: none; z-index: 60;
+    box-shadow: inset 0 0 0 0 rgba(244,63,94,0); }
+#reflexFlash.on { animation: reflexflash .55s ease-out; }
+@keyframes reflexflash {
+    0% { box-shadow: inset 0 0 0 6px rgba(244,63,94,.95), inset 0 0 90px rgba(244,63,94,.8); }
+    100% { box-shadow: inset 0 0 0 0 rgba(244,63,94,0), inset 0 0 0 rgba(244,63,94,0); }
+}
+.ev-hold { margin-top: 4px; font-size: 8px; letter-spacing: .14em; color: var(--red); }
+.th-spark { width: 100%; height: 30px; margin: 4px 0 2px; opacity: .9; }
+#timelineCanvas { display: block; width: 100%; height: 100%; min-height: 0; }
 #eventFeed {
-    border-left: 1px solid var(--edge); overflow-y: auto;
+    min-height: 0; border-left: 1px solid var(--edge); overflow-y: auto;
     font-size: 9px; padding: 4px 8px;
 }
 .ev { padding: 3px 0; border-bottom: 1px solid #101826; display: flex; gap: 8px; }
@@ -243,11 +282,12 @@ body.reflex .live-dot { background: var(--red); box-shadow: 0 0 10px var(--red);
 ::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 3px; }
 
 @media (max-height: 720px) {
-    .cam-wrap, #worldCanvas { min-height: 220px; }
-    #worldPanel { min-height: 280px; }
+    /* The views keep sharing the viewport instead of overflowing it. */
+    .cam-wrap, #worldCanvas { min-height: 0; }
+    #worldPanel { min-height: 0; }
 }
 @media (max-width: 900px) {
-    body { height: auto; min-height: 100vh; overflow: auto; grid-template-rows: 42px auto 180px; }
+    body { height: auto; min-height: 100dvh; overflow: auto; grid-template-rows: 42px auto 180px; }
     main { grid-template-columns: 1fr; }
     #threatRail { max-height: 300px; }
     .cam-wrap, #worldCanvas { min-height: min(62vh, 520px); }

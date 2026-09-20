@@ -16,10 +16,11 @@ import threading
 import urllib.request
 import json
 
-# thresholds (seconds / counts)
-FOLLOW_COMOVE_S = 45.0       # sustained co-movement while wearer is moving
-FOLLOW_REAPPEARS = 2         # lost-then-refound this many times
-FOLLOW_NEAR_M = 18.0         # "near" radius for co-movement accumulation
+# thresholds (seconds / counts) — env-tunable for demos
+FOLLOW_COMOVE_S = float(os.environ.get("HALO_FOLLOW_S", 45.0))
+FOLLOW_REAPPEARS = int(os.environ.get("HALO_FOLLOW_REAP", 2))
+FOLLOW_NEAR_M = float(os.environ.get("HALO_FOLLOW_NEAR", 18.0))
+FOLLOW_GAP_S = float(os.environ.get("HALO_FOLLOW_GAP", 10.0))
 WEARER_MOVING_MS = 0.4       # wearer must be moving for co-movement to count
 REARM_GAP_S = 120.0          # re-alert allowed after this silence
 
@@ -53,7 +54,7 @@ class FollowMemory:
             dt = min(ts - ep["prev_ts"], 0.5)      # clamp gaps
             ep["prev_ts"] = ts
             ep["seen_s"] += max(dt, 0)
-            if ts - ep["last"] > 10:
+            if ts - ep["last"] > FOLLOW_GAP_S:
                 ep["reappears"] += 1             # lost then refound — ReID win
             ep["last"] = ts
             ep["reid"] = ep["reid"] or bool(t.get("reid"))
@@ -68,7 +69,7 @@ class FollowMemory:
         for oid, ep in self._subjects.items():
             following = (ep["comove_s"] >= FOLLOW_COMOVE_S
                          or (ep["reappears"] >= FOLLOW_REAPPEARS
-                             and ep["comove_s"] >= 20))
+                             and ep["comove_s"] >= FOLLOW_COMOVE_S * 0.45))
             if not following:
                 continue
             last_alert = self._alerts.get(oid)

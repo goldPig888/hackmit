@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HALO — Predictive Safety Console</title>
-<link rel="stylesheet" href="/static/console.css">
+<link rel="stylesheet" href="/static/console.css?v=layout-live-6">
 </head>
 <body>
 <header id="topbar">
@@ -66,6 +66,7 @@
             <div class="threat-dir" id="thDir">—</div>
             <div class="risk-big"><span id="thRisk">0</span><small>/100</small></div>
             <div class="risk-bar"><div id="thRiskBar"></div></div>
+            <canvas id="thSpark" class="th-spark"></canvas>
             <div class="kv"><span>TTC</span><b id="thTtc">—</b></div>
             <div class="kv"><span>t→CPA</span><b id="thTcpa">—</b></div>
             <div class="kv"><span>d@CPA</span><b id="thDcpa">—</b></div>
@@ -117,7 +118,8 @@
     <div>WAITING FOR WORLD STATE</div>
     <div class="sub">start live_iphone_camera.py and connect the phone — or append <code>?demo</code> to preview</div>
 </div>
+<div id="reflexFlash"></div>
 
-<script src="/static/console.js"></script>
+<script src="/static/console.js?v=layout-live-6"></script>
 </body>
 </html>

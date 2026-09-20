@@ -122,6 +122,7 @@ def score_track(
     raw_px_rate: float,
     area_rate: float = 0.0,
     strike_motion: float = 0.0,
+    held_object: bool = False,
     ttc: float | None,
     will_collide: bool,
     label: str,
@@ -192,6 +193,9 @@ def score_track(
     attention = (w["d"] * proximity + w["v"] * approach + w["h"] * heading_toward
                  + w["p"] * unusual + w["t"] * persistence
                  + w["c"] * comovement + w["s"] * strike_motion)
+    # a sharp object held by the tracked subject raises concern on its own
+    if held_object:
+        attention += 0.15
     attention = _clamp01(attention)
 
     evidence = {
@@ -203,6 +207,7 @@ def score_track(
         "persistence": persistence,
         "persistent_comovement": comovement,
         "strike_motion": strike_motion,
+        "held_object": 1.0 if held_object else 0.0,
         "trajectory_conflict": 1.0 if will_collide else 0.0,
     }
 
@@ -229,6 +234,8 @@ def score_track(
         reasons.append("persistent co-movement")
     if strike_motion > 0.4:
         reasons.append("strike-like limb motion")
+    if held_object:
+        reasons.append("carries sharp-looking object")
     if will_collide:
         reasons.append("predicted paths overlap")
 

@@ -29,8 +29,15 @@ function riskColor(r, a = 1) {
 const CLS_COLORS = {
     car: "#fbbf24", truck: "#fb923c", bus: "#fb923c", motorcycle: "#f472b6",
     bicycle: "#a78bfa", person: "#34d399",
+    scissors: "#f43f5e", knife: "#f43f5e",
+    "baseball bat": "#fb923c", "tennis racket": "#fb923c",
+    bottle: "#94a3b8", umbrella: "#94a3b8",
 };
 const clsColor = c => CLS_COLORS[c] || "#22d3ee";
+const SHARP_OBJ = new Set(["scissors", "knife"]);
+const heldTag = t => t.held_object
+    ? " ·" + (SHARP_OBJ.has(t.held_object) ? "✂" : "") + t.held_object.toUpperCase()
+    : "";
 
 /* ================= MOCK ADAPTER (clearly isolated demo data) ================ */
 /* Used only with ?demo — generates a synthetic but schema-complete state so
@@ -386,16 +393,33 @@ function activeState() {
 
 function interpTracks(s) {
     if (!s || !s.tracks) return [];
-    if (!S.prev || DEMO || S.replay) return s.tracks;
-    const a = clamp((performance.now() - S.currAt) / POLL_MS, 0, 1);
-    const prevById = Object.fromEntries((S.prev.tracks || []).map(t => [t.id, t]));
-    return s.tracks.map(t => {
-        const p = prevById[t.id];
-        if (!p) return t;
-        return { ...t,
-            position: [lerp(p.position[0], t.position[0], a), lerp(p.position[1], t.position[1], a)],
-            risk: lerp(p.risk || 0, t.risk || 0, a) };
-    });
+    const now = performance.now();
+    S.seen = S.seen || {};
+    const cur = new Set();
+    for (const t of s.tracks) { cur.add(t.id); S.seen[t.id] = { t, at: now }; }
+    let out;
+    if (!S.prev || DEMO || S.replay) {
+        out = s.tracks.slice();
+    } else {
+        const a = clamp((now - S.currAt) / POLL_MS, 0, 1);
+        const prevById = Object.fromEntries((S.prev.tracks || []).map(t => [t.id, t]));
+        out = s.tracks.map(t => {
+            const p = prevById[t.id];
+            if (!p) return t;
+            return { ...t,
+                position: [lerp(p.position[0], t.position[0], a), lerp(p.position[1], t.position[1], a)],
+                risk: lerp(p.risk || 0, t.risk || 0, a) };
+        });
+    }
+    // hold recently-lost tracks as fading ghosts (~0.9s) so a single missed
+    // detection doesn't make a box blink out and back
+    for (const [id, g] of Object.entries(S.seen)) {
+        if (cur.has(id)) continue;
+        const age = now - g.at;
+        if (age > 900) { delete S.seen[id]; continue; }
+        out.push({ ...g.t, fading: 1 - age / 900 });
+    }
+    return out;
 }
 
 /* ---------------- camera feed + overlay ---------------- */
@@ -403,20 +427,37 @@ const camCv = $("camOverlay"), camWrap = $("camWrap");
 const cctx = camCv.getContext("2d");
 let camBmp = null, camFetchBusy = false;
 
+async function decodeCameraFrame(blob) {
+    // createImageBitmap is fast, but Safari can reject a valid JPEG during a
+    // transient decoder reset. Falling back to HTMLImageElement keeps the live
+    // overlay alive instead of leaving a black canvas until the next reload.
+    if (window.createImageBitmap) {
+        try { return await createImageBitmap(blob); } catch (_) { /* fallback below */ }
+    }
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(blob);
+        const image = new Image();
+        image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = () => { URL.revokeObjectURL(url); reject(new Error("JPEG decode failed")); };
+        image.src = url;
+    });
+}
+
 async function pollFrame() {
     if (camFetchBusy) return;
     camFetchBusy = true;
     try {
         const r = await fetch("/frame.jpg", { cache: "no-store" });
         if (r.status === 200) {
-            const bmp = await createImageBitmap(await r.blob());
-            if (camBmp) camBmp.close();
+            const bmp = await decodeCameraFrame(await r.blob());
+            if (camBmp && typeof camBmp.close === "function") camBmp.close();
             camBmp = bmp;
         }
     } catch (e) { /* transient — keep last bitmap */ }
     camFetchBusy = false;
 }
 setInterval(pollFrame, 90);
+pollFrame();
 
 function camRect(fw, fh) {
     const r = camWrap.getBoundingClientRect();
@@ -522,6 +563,7 @@ function drawSimScene(m, s, tracks) {
 
 function drawCamera(s, tracks) {
     const r = camWrap.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
     // Keep canvas backing pixels aligned with its CSS box on Retina displays.
     const dpr = window.devicePixelRatio || 1;
     camCv.width = Math.round(r.width * dpr); camCv.height = Math.round(r.height * dpr);
@@ -529,7 +571,7 @@ function drawCamera(s, tracks) {
     cctx.fillStyle = "#000"; cctx.fillRect(0, 0, r.width, r.height);
     $("camNoFeed").classList.toggle("show", !camBmp && !DEMO);
 
-    const fs = s.system.frame_size;
+    const fs = s.system && s.system.frame_size;
     const fw = camBmp ? camBmp.width : (fs ? fs[0] : 0);
     const fh = camBmp ? camBmp.height : (fs ? fs[1] : 0);
     if (!fw || !fh) return;
@@ -598,13 +640,15 @@ function drawCamera(s, tracks) {
 
         // bbox outline (thin — server already draws base boxes)
         if (t.bbox) {
+            const fade = t.fading != null ? t.fading : 1;
+            cctx.globalAlpha = fade;
             const [bx, by] = toScr([t.bbox[0], t.bbox[1]]);
             const bw = t.bbox[2] * m.sc, bh = t.bbox[3] * m.sc;
             cctx.strokeStyle = col; cctx.lineWidth = primary ? 4 : (linked ? 2.5 : 1.5);
             cctx.strokeRect(bx, by, bw, bh);
-            if (primary || linked || t.reid) {
+            if (primary || linked || t.reid || t.held_object) {
                 cctx.fillStyle = col; cctx.font = "bold 14px monospace";
-                const label = `${t.cls.toUpperCase()} #${t.id.split("-").pop()}${primary ? " ⚠" : ""}${t.reid ? " ·REID" : ""}`;
+                const label = `${t.cls.toUpperCase()} #${t.id.split("-").pop()}${primary ? " ⚠" : ""}${t.reid ? " ·REID" : ""}${heldTag(t)}`;
                 cctx.fillText(label, bx, by - 6);
             }
             if (t.closing_rate < -0.3) {
@@ -613,10 +657,11 @@ function drawCamera(s, tracks) {
                 cctx.fillText(`▼ ${Math.abs(t.closing_rate).toFixed(1)} m/s`, bx, by + bh + 12);
             }
             t._hit = [bx, by, bw, bh];
+            cctx.globalAlpha = 1;
         }
     }
 
-    const p = s.camera_pose;
+    const p = s.camera_pose || { yaw: 0, pitch: 0, roll: 0 };
     $("camHud").textContent =
         `YAW ${deg(p.yaw).toFixed(0)}° · PITCH ${deg(p.pitch).toFixed(0)}° · ROLL ${deg(p.roll).toFixed(0)}°`;
 }
@@ -649,7 +694,11 @@ function drawWorld(s, tracks) {
     // user zoom on top of auto-range: zoom>1 shrinks the visible range so
     // close-in detail (the strike range) fills the panel
     const target = clamp(maxD * 1.25 / (S.worldZoom || 1), 2, 60);
-    S.worldScale = lerp(S.worldScale, target, 0.08);
+    // Range used to ease at 8% per animation frame, leaving the radius far
+    // behind after a subject appeared/disappeared or the user zoomed. Snap
+    // big changes; ease small sensor jitter quickly without visual wobble.
+    const change = Math.abs(target - S.worldScale) / Math.max(S.worldScale, 1);
+    S.worldScale = change > 0.30 ? target : lerp(S.worldScale, target, 0.30);
     const scale = (Math.min(r.width, r.height) * 0.42) / S.worldScale;
     $("worldScale").textContent = `range ${S.worldScale.toFixed(0)} m` +
         ((S.worldZoom || 1) !== 1 ? ` · zoom ${S.worldZoom.toFixed(1)}×` : "");
@@ -794,6 +843,8 @@ function drawWorld(s, tracks) {
     for (const t of tracks) {
         const primary = t.id === s.primary_threat_id || t.att_state === "REFLEX";
         const linked = t.id === S.linked;
+        const fade = t.fading != null ? t.fading : 1;
+        wctx.globalAlpha = fade;
         const [sx, sy] = w2s(t.position);
         const rad = primary ? 8 : 5;
         wctx.fillStyle = primary ? riskColor(t.att_state === "REFLEX" ? 1 : t.risk) : hexA(clsColor(t.cls), spotlight ? (t.att_state === "ATTEND" ? 0.35 : 0.15) : (t.att_state === "ATTEND" ? 0.85 : 0.6));
@@ -815,8 +866,9 @@ function drawWorld(s, tracks) {
         // label
         wctx.fillStyle = primary ? "#fff" : (t.reid ? "rgba(244,114,182,0.95)" : "rgba(200,214,229,0.85)");
         wctx.font = (primary ? "bold " : "") + "10px monospace";
-        wctx.fillText(`${t.cls.toUpperCase()} #${t.id.split("-").pop()}`, sx + rad + 4, sy + 3);
+        wctx.fillText(`${t.cls.toUpperCase()} #${t.id.split("-").pop()}${heldTag(t)}`, sx + rad + 4, sy + 3);
         t._whit = [sx, sy];
+        wctx.globalAlpha = 1;
     }
 
     // wearer
@@ -929,13 +981,22 @@ function updateDom(s, tracks) {
         sceneLabel + (scene.people != null ? ` · ${scene.people}p` : "")
         + (scene.ego_motion && scene.ego_motion !== "stationary"
             ? ` · ${scene.ego_motion.toUpperCase()}` : "");
-    document.body.classList.toggle("reflex", Boolean(scene.reflex));
-    reflexAlert(Boolean(scene.reflex));
+    const reflexOn = Boolean(scene.reflex);
+    document.body.classList.toggle("reflex", reflexOn);
+    reflexAlert(reflexOn);
+    // reflex onset: hard red flash + freeze the evidence bars ~2.5s so the
+    // judge can read *why* it fired — attention accumulates, reflex reacts
+    if (reflexOn && !S._reflexOn) {
+        const fl = $("reflexFlash");
+        if (fl) { fl.classList.remove("on"); void fl.offsetWidth; fl.classList.add("on"); }
+        if (s.threat) S.evHold = { until: performance.now() + 2500, ev: s.threat.evidence };
+    }
+    S._reflexOn = reflexOn;
 
     // threat rail
     const th = s.threat;
     if (th) {
-        $("thId").textContent = `${(th.cls || "").toUpperCase()} ${th.id}`;
+        $("thId").textContent = `${(th.cls || "").toUpperCase()} ${th.id}${heldTag(th)}`;
         $("thDir").textContent =
             `${th.att_state || "—"} · ${th.direction_label || "—"}`;
         const pct = Math.round((th.risk || 0) * 100);
@@ -944,6 +1005,11 @@ function updateDom(s, tracks) {
         rb.className = "risk-big" + (pct > 70 ? " high" : pct > 40 ? " med" : "");
         $("thRiskBar").style.width = pct + "%";
         $("thRiskBar").style.background = riskColor(th.risk);
+        // sparkline history: attention (cyan) + risk (red), last ~5s
+        S.spark = S.spark || [];
+        S.spark.push({ t: performance.now(), a: th.attention || 0, r: th.risk || 0 });
+        while (S.spark.length > 120) S.spark.shift();
+        drawSpark();
         $("thTtc").textContent = th.ttc != null ? th.ttc.toFixed(1) + " s" : "—";
         $("thTcpa").textContent = th.tcpa != null && isFinite(th.tcpa) ? th.tcpa.toFixed(1) + " s" : "—";
         $("thDcpa").textContent = th.dcpa != null ? th.dcpa.toFixed(1) + " m" : "—";
@@ -957,14 +1023,23 @@ function updateDom(s, tracks) {
         }
         $("whyList").innerHTML = whyHtml.join("");
 
-        // evidence breakdown — attention as auditable channel scores
-        const ev = th.evidence || {};
+        // evidence breakdown — attention as auditable channel scores, lerped
+        // so bars visibly rise/fall; frozen briefly after a reflex
+        const held = S.evHold && performance.now() < S.evHold.until ? S.evHold : null;
+        const ev = held ? held.ev : (th.evidence || {});
+        S.evDisp = S.evDisp || {};
+        for (const k of Object.keys(S.evDisp)) if (!(k in ev)) delete S.evDisp[k];
         const evRows = Object.entries(ev)
-            .sort((a, b) => b[1] - a[1]).slice(0, 5)
-            .map(([k, v]) => `<div class="ev-row"><span>${k.replace(/_/g, " ")}</span>` +
-                `<div class="ev-bar"><div style="width:${Math.round(v * 100)}%"></div></div>` +
-                `<b>${v.toFixed(2)}</b></div>`);
-        $("evBars").innerHTML = evRows.join("");
+            .sort((a, b) => b[1] - a[1]).slice(0, 6)
+            .map(([k, v]) => {
+                S.evDisp[k] = (S.evDisp[k] || 0) + (v - (S.evDisp[k] || 0)) * 0.25;
+                const dv = Math.max(0, Math.min(1, S.evDisp[k]));
+                return `<div class="ev-row"><span>${k.replace(/_/g, " ")}</span>` +
+                    `<div class="ev-bar"><div style="width:${Math.round(dv * 100)}%"></div></div>` +
+                    `<b>${dv.toFixed(2)}</b></div>`;
+            });
+        $("evBars").innerHTML = evRows.join("")
+            + (held ? `<div class="ev-hold">REFLEX SNAPSHOT</div>` : "");
 
         const sec = th.secondary;
         $("thSec").textContent = sec
@@ -976,6 +1051,7 @@ function updateDom(s, tracks) {
         $("whyList").innerHTML = `<li class="dim">no active threat</li>`;
         $("evBars").innerHTML = "";
         $("thSec").textContent = "—";
+        if (S.spark) { S.spark.length = 0; drawSpark(); }
     }
 
     // episodic memory: persistent-follower alerts surface here regardless of
@@ -997,9 +1073,16 @@ function updateDom(s, tracks) {
     // Keep the large camera annotation present for the selected track. It
     // changes vocabulary/color with risk instead of flashing away between
     // low-risk frames and the next risk assessment.
-    const showAlert = Boolean(th && alertTrack);
+    const showAlert = Boolean((s.system && (s.system.camera || s.system.frame_size)) || (th && alertTrack));
     alert.hidden = !showAlert;
     if (showAlert) {
+        if (!th || !alertTrack) {
+            alert.classList.remove("reflex", "high", "track");
+            alert.classList.add("track");
+            $("cameraAlertTitle").textContent = "SCANNING · LIVE";
+            alert.querySelector(".camera-alert-kicker").textContent = "NO TRACKED SUBJECTS";
+            $("cameraAlertMeta").textContent = "CAMERA ACTIVE · WAITING FOR DETECTIONS";
+        } else {
         const reflex = th.att_state === "REFLEX" || (scene.reflex && alertTrack.att_state === "REFLEX");
         const high = th.risk >= 0.70;
         const conflict = th.risk >= 0.30 || reflex;
@@ -1018,6 +1101,7 @@ function updateDom(s, tracks) {
         alert.querySelector(".camera-alert-kicker").textContent =
             reflex ? "HALO REFLEX" : (conflict ? "PREDICTED CONFLICT" : "TRACKING");
         $("cameraAlertMeta").textContent = `${label} · ${cpa}`;
+        }
     }
 
     // haptics (decay after 1.5s)
@@ -1059,6 +1143,36 @@ function setPill(id, ok, okText, badText) {
     const el = $(id);
     el.querySelector("b").textContent = ok ? okText : badText;
     el.className = "pill " + (ok ? "ok" : "bad");
+}
+
+/* ---------------- threat sparkline ---------------- */
+// tiny 5s attention/risk history — a single number becomes a trend
+function drawSpark() {
+    const cv = $("thSpark"); if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth || 160, h = cv.clientHeight || 30;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = w * dpr; cv.height = h * dpr; }
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const pts = S.spark || [];
+    if (pts.length < 2) return;
+    const t0 = pts[0].t, span = Math.max(performance.now() - t0, 1);
+    const draw = (key, color) => {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        pts.forEach((p, i) => {
+            const x = (p.t - t0) / span * (w - 2) + 1;
+            const y = h - 3 - p[key] * (h - 6);
+            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        });
+        ctx.stroke();
+    };
+    draw("a", "rgba(34,211,238,0.85)");   // attention
+    draw("r", "rgba(244,63,94,0.9)");     // risk
+    ctx.fillStyle = "rgba(148,163,184,0.7)"; ctx.font = "7px monospace";
+    ctx.fillText("ATT", 2, 8); ctx.fillStyle = "rgba(244,63,94,0.8)";
+    ctx.fillText("RISK", 2, h - 2);
 }
 
 /* ---------------- reflex audio alert ---------------- */
@@ -1177,6 +1291,7 @@ $("clearSubjects").addEventListener("click", async () => {
         const response = await fetch("/api/clear-subjects", { method: "POST" });
         if (!response.ok) throw new Error("clear request failed");
         S.prev = null; S.curr = null; S.snapshots = []; S.linked = null; S.lastEventId = 0;
+        S.seen = {}; S.evHold = null; S.spark = []; S.evDisp = {};
     } catch (error) {
         console.error("Could not clear subjects", error);
     } finally {
@@ -1186,11 +1301,47 @@ $("clearSubjects").addEventListener("click", async () => {
     }
 });
 
+/* A canvas does not repaint itself when CSS Grid finishes a late layout pass.
+   Safari commonly does that after the first live state arrives, which used to
+   leave a one-pixel-looking camera/world panel until a manual reload. */
+let layoutRenderQueued = false;
+function redrawAfterLayout() {
+    if (layoutRenderQueued) return;
+    layoutRenderQueued = true;
+    requestAnimationFrame(() => {
+        layoutRenderQueued = false;
+        const s = activeState();
+        if (!s || !s.ready) return;
+        try {
+            const tracks = interpTracks(s);
+            drawCamera(s, tracks);
+            drawWorld(s, tracks);
+            drawTimeline(s);
+            updateDom(s, tracks);
+        } catch (e) { console.error("layout redraw error:", e); }
+    });
+}
+
+if (window.ResizeObserver) {
+    const layoutObserver = new ResizeObserver(redrawAfterLayout);
+    [$("camWrap"), $("worldCanvas"), $("timelineCanvas")].forEach(node => layoutObserver.observe(node));
+}
+window.addEventListener("resize", redrawAfterLayout);
+window.addEventListener("pageshow", () => {
+    redrawAfterLayout();
+    poll();
+});
+
 /* ---------------- main loop ---------------- */
 function frame() {
     const s = activeState();
     const ready = s && s.ready;
     $("emptyState").hidden = ready || DEMO;
+    // The JPEG stream is independent of the world model. Paint it immediately
+    // rather than making the live camera wait for its first tracking snapshot.
+    if (!ready && (camBmp || DEMO)) {
+        drawCamera(s || { system: {}, camera_pose: { yaw: 0, pitch: 0, roll: 0 } }, []);
+    }
     if (ready) {
         try {
             const tracks = interpTracks(s);
