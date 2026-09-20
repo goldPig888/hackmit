@@ -16,15 +16,24 @@ context-aware attention + reflex → video / console / haptics
 
 ## Features
 
-- iPhone Safari camera + Device Motion/Orientation streaming over one WebSocket.
-- Phone-pose compensation that separates rider/camera turns from object motion.
-- YOLO11n detection of people and road users; BoT-SORT + selective ReID in iPhone mode, with ByteTrack fallback.
-- Semantic monocular depth, world-frame tracking, and a per-object extended Kalman filter.
-- Four-second object and curved rider-path prediction with closest-point-of-approach (CPA) conflict scoring.
-- Context-aware `OBSERVE → ATTEND → WARN → REFLEX` attention policy.
-- Explainable per-track evidence: approach, heading, expansion, co-movement, trajectory conflict, and strike-like motion.
-- A compute-bounded pose path: only up to two close-range people receive pose inference for wrist-speed and elbow-extension evidence.
-- Directional local/ESP32 haptics, annotated video, a predicted-world dashboard, fullscreen views, replay, zoom, clear-subjects control, and a Training Lab.
+| Feature | What it means | Live status |
+|---|---|---|
+| Predictive personal-safety layer | Forecasts interactions instead of only labeling nearby objects. | Active |
+| iPhone sensing and transport | Safari streams JPEG frames plus orientation, gyro, and acceleration over `/ingest`. | Active |
+| YOLO11n + persistent subjects | Detects road users and people; iPhone mode prefers BoT-SORT + selective ReID, with ByteTrack fallback. | Active |
+| IMU ego-motion compensation | Stabilizes camera rays so turning the phone is not mistaken for subject motion. | Active |
+| Stabilized 3D world model | Tracks approximate `[X, Y, Z, Vx, Vy, Vz]` object state with an EKF. | Active |
+| Future path prediction | Predicts straight constant-velocity object paths and a curved rider arc for four seconds. | Active |
+| CPA conflict reasoning | Separates a close safe pass from predicted path overlap using time and distance at closest approach. | Active |
+| Multiple independent cues | Combines depth, closing rate, bearing, expansion/looming, trajectory overlap, and uncertainty instead of relying on one signal. | Active / experimental by module |
+| Two-path attention | Uses a slow contextual `OBSERVE → ATTEND → WARN` path plus a deterministic high-priority `REFLEX` path. | Active |
+| Explainable behavior evidence | Shows proximity, rapid approach, heading, unusual motion, persistence, co-movement, strike-like motion, and path-conflict evidence. | Active |
+| Compute-bounded pose reflex | Runs pose only for up to two close-range people to calculate wrist-speed and elbow-extension evidence. | Active |
+| Collective hazard patterns | Provides convergence, coordinated-motion, encirclement, flanking, trap, and ambush analysis modules. These describe geometry, not intent. | Available module; not yet wired into the live iPhone alert policy |
+| Directional haptics and explainable console | Emits directional JSONL/ESP32 haptics and renders video, world paths, evidence, replay, zoom, fullscreen, and clear-subject controls. | Active |
+| Adaptive learning | Includes a simulation/PPO Training Lab for the slow attention policy; deterministic REFLEX remains outside the learned policy. | Training Lab / experimental |
+
+HALO labels **observable motion and geometric interaction patterns only**. It does not identify people, infer intent, or determine whether someone is dangerous.
 
 ## Quick start
 
